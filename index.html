@@ -1,88 +1,68 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0a0d0c">
-<title>Not Quite My Tempo — Live BPM</title>
-<style>
-  :root{
-    --bg:#0a0d0c;            /* panel body */
-    --face:#101514;          /* faceplate */
-    --line:#1f2624;          /* hairline dividers */
-    --silk:#c9d2ce;          /* silkscreen labels */
-    --dim:#5c6a65;           /* muted labels */
-    --phos:#00ff88;          /* phosphor readout */
-    --phos-dim:#0a5c38;
-    --amber:#ffb454;         /* warning lamp */
-    --red:#ff5f56;           /* clip lamp */
-    --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%}
-  body{
-    background:var(--bg);
-    color:var(--silk);
-    font-family:var(--sans);
-    display:flex;justify-content:center;
-    padding:22px 14px 40px;
-    -webkit-font-smoothing:antialiased;
-  }
-  /* ambient bass glow behind everything */
-  #glow{
-    position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0;
-    background:radial-gradient(ellipse 70% 45% at 50% 30%,rgba(0,255,136,.14),transparent 70%);
-    transition:opacity .08s linear;
-  }
-  #panel{
-    position:relative;z-index:1;width:100%;max-width:680px;
-    background:var(--face);
-    border:1px solid var(--line);
-    border-radius:10px;
-    box-shadow:0 24px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.03);
-    overflow:hidden;
-  }
-  section{padding:16px 20px;border-bottom:1px solid var(--line)}
-  section:last-of-type{border-bottom:none}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live BPM Monitor</title>
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        #bpm-display { font-size: 8rem; font-weight: 900; color: #00ff88; margin: 20px 0; }
+        #visualizer { width: 100%; height: 100px; background: #111; margin-bottom: 20px; }
+        .pulse { animation: pulse 0.15s ease-out; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        .btn { padding: 20px 40px; font-size: 20px; border-radius: 50px; border: none; background: #00ff88; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Vinyl BPM Monitor</h1>
+    <div id="bpm-display">--</div>
+    <canvas id="visualizer"></canvas>
+    <button id="start-btn" class="btn">Start Monitoring</button>
 
-  /* ---------- header ---------- */
-  #hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 20px}
-  #hdr h1{
-    font-size:11px;font-weight:600;letter-spacing:.32em;text-transform:uppercase;color:var(--silk);
-  }
-  #hdr h1 em{font-style:normal;color:var(--dim);letter-spacing:.32em}
-  .lamp{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;letter-spacing:.14em}
-  .lamp i{width:9px;height:9px;border-radius:50%;background:#2a3330;flex:none;transition:background .2s,box-shadow .2s}
-  .lamp.idle      i{background:#2a3330}
-  .lamp.listening i{background:var(--amber);box-shadow:0 0 8px rgba(255,180,84,.7)}
-  .lamp.nosignal  i{background:var(--amber);box-shadow:0 0 8px rgba(255,180,84,.7)}
-  .lamp.tracking  i{background:#9fb4ac;box-shadow:0 0 8px rgba(159,180,172,.6)}
-  .lamp.locked    i{background:var(--phos);box-shadow:0 0 10px rgba(0,255,136,.9)}
+    <script src="https://cdn.jsdelivr.net/npm/realtime-bpm-analyzer/dist/index.min.js"></script>
+    <script>
+        const btn = document.getElementById('start-btn');
+        const display = document.getElementById('bpm-display');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        
+        btn.onclick = async () => {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
 
-  /* ---------- transport / controls ---------- */
-  #controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 20px}
-  select,.btn{
-    background:#0c1110;color:var(--silk);
-    border:1px solid var(--line);border-radius:6px;
-    font-family:var(--mono);font-size:12px;letter-spacing:.05em;
-    padding:8px 12px;cursor:pointer;
-  }
-  select{flex:1;min-width:180px;max-width:100%}
-  select:focus-visible,.btn:focus-visible{outline:2px solid var(--phos);outline-offset:1px}
-  .btn:hover{border-color:#33403b}
-  .btn:active{transform:translateY(1px)}
-  .btn.on{color:var(--phos);border-color:var(--phos-dim)}
+            const bpmEngine = new RealTimeBpmAnalyzer();
+            source.connect(bpmEngine.node);
 
-  /* ---------- readout ---------- */
-  #readout{position:relative;text-align:center;padding:34px 20px 26px}
-  #rings{position:absolute;left:50%;top:46%;width:0;height:0;pointer-events:none}
-  .ring{
-    position:absolute;left:0;top:0;width:230px;height:230px;
-    transform:translate(-50%,-50%) scale(.5);
-    border:2px solid var(--phos);border-radius:50%;opacity:0;
-  }
+            bpmEngine.on('bpm', (data) => {
+                if (data.bpm.length > 0) {
+                    const bpm = Math.round(data.bpm[0].tempo);
+                    display.innerText = bpm;
+                    display.classList.add('pulse');
+                    setTimeout(() => display.classList.remove('pulse'), 100);
+                }
+            });
+
+            btn.style.display = 'none';
+
+            function draw() {
+                requestAnimationFrame(draw);
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(data);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#00ff88';
+                for(let i = 0; i < data.length; i++) {
+                    ctx.fillRect(i * 3, canvas.height - data[i]/2, 2, data[i]/2);
+                }
+            }
+            draw();
+        };
+    </script>
+</body>
+</html>  }
   #bpm{
     position:relative;
     font-family:var(--mono);font-variant-numeric:tabular-nums;
