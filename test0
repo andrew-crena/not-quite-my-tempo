@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Live BPM + Key Monitor</title>
+<style>
+  :root { --accent:#00ff88; --bg:#050505; }
+  * { box-sizing:border-box; }
+  body{
+    background:var(--bg); color:#fff; font-family:system-ui,Segoe UI,sans-serif;
+    text-align:center; margin:0; padding:20px; overflow-x:hidden;
+  }
+  h1{ font-weight:300; letter-spacing:4px; text-transform:uppercase; opacity:.7; font-size:1.1rem; margin:10px 0 6px; }
+
+  #bpm-wrap{ position:relative; display:inline-block; margin:6px auto 10px; }
+  #bpm-display{
+    font-size:8.5rem; font-weight:900; color:var(--accent); line-height:1;
+    text-shadow:0 0 30px var(--accent);
+    transition:transform .08s ease-out, text-shadow .1s, opacity .2s;
+  }
+  #pulse-ring{
+    position:absolute; top:50%; left:50%;
+    width:250px; height:250px; margin:-125px 0 0 -125px;
+    border-radius:50%; border:3px solid var(--accent); opacity:0; pointer-events:none;
+  }
+  .ring-pulse{ animation:ringExpand .3s ease-out; }
+  @keyframes ringExpand{ 0%{transform:scale(.7);opacity:.85;} 100%{transform:scale(1.3);opacity:0;} }
+
+  #labelRow{ opacity:.55; letter-spacing:3px; text-transform:uppercase; font-size:.85rem; margin-top:-6px; }
+
+  #canvasBox{ max-width:980px; margin:12px auto 10px; }
+  canvas{ width:100%; display:block; background:#0a0a0a; border-radius:12px; }
+
+  .stats{
+    display:flex; flex-wrap:wrap; justify-content:center; gap:12px;
+    max-width:980px; margin:12px auto 18px;
+  }
+  .stat{
+    background:#111; border:1px solid #222; border-radius:10px;
+    padding:12px 16px; min-width:150px;
+  }
+  .val{ font-size:1.6rem; font-weight:800; color:var(--accent); }
+  .lbl{ font-size:.7rem; letter-spacing:2px; opacity:.55; text-transform:uppercase; margin-top:4px; }
+
+  .btn{
+    padding:16px 36px; font-size:18px; border-radius:50px; border:none;
+    background:var(--accent); color:#000; font-weight:800; cursor:pointer; letter-spacing:1px;
+  }
+  #reset-btn{ display:none; background:#333; color:#fff; margin-left:10px; }
+  #status{ font-size:.85rem; opacity:.65; margin-top:10px; min-height:18px; }
+
+  .beat-flash{
+    position:fixed; inset:0;
+    background:radial-gradient(circle, rgba(0,255,136,0.14), transparent 70%);
+    pointer-events:none; opacity:0; z-index:-1;
+  }
+</style>
+</head>
+<body>
+  <div class="beat-flash" id="flash"></div>
+  <h1>Vinyl BPM + Key Monitor</h1>
+
+  <div id="bpm-wrap">
+    <div id="pulse-ring"></div>
+    <div id="bpm-display">--</div>
+  </div>
+  <div id="labelRow">BPM</div>
+
+  <div class="stats">
+    <div class="stat"><div class="val" id="s-conf">0%</div><div class="lbl">Beat Confidence</div></div>
+    <div class="stat"><div class="val" id="s-inst">--</div><div class="lbl">Instant BPM</div></div>
+    <div class="stat"><div class="val" id="s-vol">0</div><div class="lbl">Volume</div></div>
+
+    <div class="stat"><div class="val" id="s-key">--</div><div class="lbl">Detected Key</div></div>
+    <div class="stat"><div class="val" id="s-cam">--</div><div class="lbl">Camelot</div></div>
+    <div class="stat"><div class="val" id="s-kconf">0%</div><div class="lbl">Key Confidence</div></div>
+  </div>
+
+  <div id="canvasBox">
+    <canvas id="visualizer" width="980" height="200"></canvas>
+  </div>
+
+  <button id="start-btn" class="btn">▶ Start Monitoring</button>
+  <button id="reset-btn" class="btn">Reset</button>
+  <div id="status">Click start and select your audio input.</div>
+
+<script>
+(() => {
+  // DOM
+  const btn      = document.getElementById('start-btn');
+  const resetBtn = document.getElementById('reset-btn');
+  const display  = document.getElementById('bpm-display');
+  const ring     = document.getElementById('pulse-ring');
+  const flash    = document.getElementById('flash');
+  const canvas   = document.getElementById('visualizer');
+  const ctx      = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+
+  const el = {
+    beatConf: document.getElementById('s-conf'),
+    instBpm:  document.getElementById('s-inst'),
+    vol:      document.getElementById('s-vol'),
+    key:      document.getElementById('s-key'),
+    cam:      document.getElementById('s-cam'),
+    keyConf:  document.getElementById('s-kconf'),
+  };
+
+  // Audio
+  let audioCtx, analyser, stream, running = false;
+  let freqData, timeData;
+
+  // ---------- BPM detection state ----------
+  let energyHistory = [];
+  const HISTORY_SIZE = 43;
+  let lastBeatTime = 0;
+  const MIN_BEAT_INTERVAL = 250;
+  let beatTimes = [];
+  let smoothedBpm = 0;
+
+  function onBeat() {
+    ring.classList.remove('ring-pulse'); void ring.offsetWidth; ring.classList.add('ring-pulse');
+    display.style.transform = 'scale(1.12)';
+    display.style.textShadow = '0 0 55px var(--accent), 0 0 90px var(--accent)';
+    setTimeout(() => { display.style.transform='scale(1)'; display.style.textShadow='0 0 30px var(--accent)'; }, 90);
+
+    flash.style.transition = 'none'; flash.style.opacity = '1';
+    requestAnimationFrame(() => { flash.style.transition = 'opacity 0.3s'; flash.style.opacity = '0'; });
+  }
+
+  function detectBeat(now) {
+    const bassEnd = Math.floor(freqData.length * 0.12);
+    let energy = 0;
+    for (let i = 0; i < bassEnd; i++) energy += freqData[i] * freqData[i];
+    energy /= bassEnd;
+
+    energyHistory.push(energy);
+    if (energyHistory.length > HISTORY_SIZE) energyHistory.shift();
+
+    const mean = energyHistory.reduce((a,b)=>a+b,0) / energyHistory.length;
+    let variance = 0;
+    for (const e of energyHistory) variance += (e-mean)*(e-mean);
+    variance /= energyHistory.length;
+
+    const threshold = mean * (1.35 + variance/(mean*mean + 1)*0.15);
+    const isBeat = energy > threshold && energy > 1200 && (now - lastBeatTime) > MIN_BEAT_INTERVAL;
+
+    if (isBeat) {
+      lastBeatTime = now;
+      beatTimes.push(now);
+      if (beatTimes.length > 24) beatTimes.shift();
+      onBeat();
+      computeBpm();
+    }
+  }
+
+  function computeBpm() {
+    if (beatTimes.length < 4) return;
+
+    const intervals = [];
+    for (let i = 1; i < beatTimes.length; i++) intervals.push(beatTimes[i] - beatTimes[i-1]);
+
+    const sorted = [...intervals].sort((a,b)=>a-b);
+    const median = sorted[Math.floor(sorted.length/2)];
+    let bpm = 60000 / median;
+
+    while (bpm < 70) bpm *= 2;
+    while (bpm > 180) bpm /= 2;
+
+    const meanInt = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+    let dev = 0;
+    for (const iv of intervals) dev += Math.abs(iv - meanInt);
+    dev /= intervals.length;
+    const confidence = Math.max(0, Math.min(100, 100 - (dev/meanInt)*200));
+
+    el.instBpm.textContent = String(Math.round(bpm));
+    el.beatConf.textContent = Math.round(confidence) + '%';
+
+    if (smoothedBpm === 0) smoothedBpm = bpm;
+    const alpha = 0.15 + (confidence/100)*0.25;
+    smoothedBpm += (bpm - smoothedBpm) * alpha;
+    display.textContent = String(Math.round(smoothedBpm));
+  }
+
+  // ---------- KEY detection (YIN pitch + mapping) ----------
+  // NOTE: This detects "fundamental pitch" for the current moment.
+  // On mixed/mastered music it will be noisy; we stabilize via voting.
+
+  const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+  // Camelot mapping (common DJ standard) for MAJOR/MINOR.
+  // We’ll derive by key name. Enharmonics simplified to sharps.
+  const CAMELOT_MAJOR = {
+    "B":"1B","F#":"2B","C#":"3B","G#":"4B","D#":"5B","A#":"6B","F":"7B","C":"8B","G":"9B","D":"10B","A":"11B","E":"12B"
+  };
+  const CAMELOT_MINOR = {
+    "G#":"1A","D#":"2A","A#":"3A","F":"4A","C":"5A","G":"6A","D":"7A","A":"8A","E":"9A","B":"10A","F#":"11A","C#":"12A"
+  };
+
+  function freqToMidi(f) { return 69 + 12 * Math.log2(f / 440); }
+  function midiToNoteName(m) {
+    const nn = ((Math.round(m) % 12) + 12) % 12;
+    return NOTE_NAMES[nn];
+  }
+
+  // Very lightweight "key guess" from pitch-class histogram:
+  // - We gather note classes over time (from detected pitch)
+  // - The strongest pitch class becomes tonic guess
+  // - Major/minor inferred by comparing major 3rd vs minor 3rd weight
+  //
+  // This is not as strong as full Krumhansl-Schmuckler, but works decently for live overlays.
+  const pcHist = new Array(12).fill(0);
+  let keySmooth = { name: "--", mode: "", conf: 0, camelot: "--" };
+
+  function yinPitchDetector(floatBuf, sampleRate) {
+    // Returns {freq, clarity} or null
+    const threshold = 0.12; // lower = more sensitive
+    const bufSize = floatBuf.length;
+
+    // Difference function d(tau)
+    const maxTau = Math.floor(bufSize / 2);
+    const d = new Float32Array(maxTau);
+    for (let tau = 1; tau < maxTau; tau++) {
+      let sum = 0;
+      for (let i = 0; i < maxTau; i++) {
+        const diff = floatBuf[i] - floatBuf[i + tau];
+        sum += diff * diff;
+      }
+      d[tau] = sum;
+    }
+
+    // Cumulative mean normalized difference function
+    const cmnd = new Float32Array(maxTau);
+    cmnd[0] = 1;
+    let runningSum = 0;
+    for (let tau = 1; tau < maxTau; tau++) {
+      runningSum += d[tau];
+      cmnd[tau] = d[tau] * tau / (runningSum || 1e-9);
+    }
+
+    // Absolute threshold
+    let tauEstimate = -1;
+    for (let tau = 2; tau < maxTau; tau++) {
+      if (cmnd[tau] < threshold) {
+        while (tau + 1 < maxTau && cmnd[tau + 1] < cmnd[tau]) tau++;
+        tauEstimate = tau;
+        break;
+      }
+    }
+    if (tauEstimate === -1) return null;
+
+    // Parabolic interpolation around tauEstimate
+    const x0 = tauEstimate > 1 ? tauEstimate - 1 : tauEstimate;
+    const x2 = tauEstimate + 1 < maxTau ? tauEstimate + 1 : tauEstimate;
+    const s0 = cmnd[x0], s1 = cmnd[tauEstimate], s2 = cmnd[x2];
+    const a = (s0 + s2 - 2 * s1) / 2;
+    const b = (s2 - s0) / 2;
+    const betterTau = (a !== 0) ? (tauEstimate - b / (2 * a)) : tauEstimate;
+
+    const freq = sampleRate / betterTau;
+    const clarity = Math.max(0, Math.min(1, 1 - cmnd[tauEstimate])); // higher = better
+    if (freq < 50 || freq > 2000) return null; // ignore out of range
+    return { freq, clarity };
+  }
+
+  function updateKeyFromPitch(freq, clarity) {
+    const midi = freqToMidi(freq);
+    const pc = ((Math.round(midi) % 12) + 12) % 12;
+
+    // Decay old histogram slowly; add new weight by clarity
+    for (let i = 0; i < 12; i++) pcHist[i] *= 0.985;
+    pcHist[pc] += 1.2 * clarity;
+
+    // Find strongest pitch class (tonic guess)
+    let maxV = -1, tonic = 0, sum = 0;
+    for (let i = 0; i < 12; i++) { sum += pcHist[i]; if (pcHist[i] > maxV) { maxV = pcHist[i]; tonic = i; } }
+
+    const tonicName = NOTE_NAMES[tonic];
+
+    // Major vs minor heuristic:
+    // compare weights at major third (+4) and minor third (+3) above tonic
+    const maj3 = pcHist[(tonic + 4) % 12];
+    const min3 = pcHist[(tonic + 3) % 12];
+    const mode = (maj3 >= min3) ? "Major" : "Minor";
+
+    // Confidence: how dominant the tonic is vs total
+    const conf = sum > 0 ? Math.max(0, Math.min(100, (maxV / sum) * 140)) : 0;
+
+    const camelot = mode === "Major"
+      ? (CAMELOT_MAJOR[tonicName] || "--")
+      : (CAMELOT_MINOR[tonicName] || "--");
+
+    // Smooth display (reduce flicker)
+    // If new conf is strong, update; otherwise keep last
+    if (conf > keySmooth.conf * 0.85 || conf > 28) {
+      keySmooth = { name: tonicName, mode, conf, camelot };
+    } else {
+      keySmooth.conf *= 0.995;
+    }
+
+    el.key.textContent = `${keySmooth.name} ${keySmooth.mode}`;
+    el.cam.textContent = keySmooth.camelot;
+    el.keyConf.textContent = `${Math.round(keySmooth.conf)}%`;
+  }
+
+  // ---------- Visualizer ----------
+  const floatBuf = new Float32Array(2048);
+
+  function draw() {
+    if (!running) return;
+    requestAnimationFrame(draw);
+
+    analyser.getByteFrequencyData(freqData);
+    analyser.getByteTimeDomainData(timeData);
+
+    // Beat detect
+    detectBeat(performance.now());
+
+    // Volume
+    let sum = 0;
+    for (let i = 0; i < freqData.length; i++) sum += freqData[i];
+    const avgVol = Math.round(sum / freqData.length);
+    el.vol.textContent = String(avgVol);
+    display.style.opacity = avgVol < 5 ? 0.3 : 1;
+
+    // Key detect: convert byte time domain to float [-1..1]
+    // and run YIN every frame (you can reduce to every 2nd frame if CPU is high)
+    if (timeData.length >= floatBuf.length) {
+      for (let i = 0; i < floatBuf.length; i++) {
+        floatBuf[i] = (timeData[i] - 128) / 128;
+      }
+      const pitch = yinPitchDetector(floatBuf, audioCtx.sampleRate);
+      if (pitch && pitch.clarity > 0.55) {
+        updateKeyFromPitch(pitch.freq, pitch.clarity);
+      } else {
+        // decay confidence slowly when unclear
+        keySmooth.conf *= 0.992;
+        el.keyConf.textContent = `${Math.round(keySmooth.conf)}%`;
+      }
+    }
+
+    // Draw bars + waveform
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const barCount = 110;
+    const step = Math.floor(freqData.length / barCount);
+    const barW = w / barCount;
+
+    for (let i = 0; i < barCount; i++) {
+      const v = freqData[i * step] / 255;
+      const barH = v * h;
+      const hue = 135 + (i / barCount) * 70;
+      ctx.fillStyle = `hsl(${hue}, 100%, ${35 + v * 35}%)`;
+      ctx.fillRect(i * barW, h - barH, barW - 1, barH);
+    }
+
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    for (let i = 0; i < timeData.length; i++) {
+      const x = (i / timeData.length) * w;
+      const y = (timeData[i] / 255) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  async function start() {
+    try {
+      statusEl.textContent = 'Requesting audio input...';
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+      timeData = new Uint8Array(analyser.fftSize);
+
+      running = true;
+      btn.style.display = 'none';
+      resetBtn.style.display = 'inline-block';
+      statusEl.textContent = 'Listening…';
+      draw();
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+      console.error(err);
+    }
+  }
+
+  function reset() {
+    beatTimes = [];
+    energyHistory = [];
+    smoothedBpm = 0;
+    display.textContent = '--';
+    el.instBpm.textContent = '--';
+    el.beatConf.textContent = '0%';
+
+    for (let i = 0; i < 12; i++) pcHist[i] = 0;
+    keySmooth = { name: "--", mode: "", conf: 0, camelot: "--" };
+    el.key.textContent = '--';
+    el.cam.textContent = '--';
+    el.keyConf.textContent = '0%';
+
+    statusEl.textContent = 'Reset.';
+  }
+
+  btn.onclick = start;
+  resetBtn.onclick = reset;
+})();
+</script>
+</body>
+</html>
