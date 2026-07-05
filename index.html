@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPM Detector</title>
     <style>
         body { background: #0f0f0f; color: #fff; font-family: system-ui; text-align: center; padding: 20px; }
-        #canvas { width: 100%; max-width: 500px; height: 150px; background: #1a1a1a; border-radius: 8px; margin: 20px 0; }
+        #canvas { width: 100%; max-width: 500px; height: 150px; background: #1a1a1a; border-radius: 8px; margin: 20px auto; display: block; }
         #bpm-display { font-size: 5rem; font-weight: bold; color: #00ff88; margin: 10px 0; }
         .btn { padding: 15px 30px; font-size: 18px; border: none; border-radius: 50px; cursor: pointer; background: #00ff88; color: #000; font-weight: bold; }
         .active-beat { animation: pulse 0.2s; }
@@ -18,7 +20,9 @@
     <canvas id="canvas"></canvas>
     <button id="start-btn" class="btn">Start Microphone</button>
 
+    <!-- Load the library from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/realtime-bpm-analyzer/dist/index.min.js"></script>
+    
     <script>
         const btn = document.getElementById('start-btn');
         const display = document.getElementById('bpm-display');
@@ -27,40 +31,42 @@
         const ctx = canvas.getContext('2d');
         
         let audioContext;
-        let analyzer;
 
         btn.onclick = async () => {
             try {
-                // 1. Setup AudioContext with cross-browser compatibility
+                // Initialize AudioContext
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
-                // 2. Critical for iPhone: Resume the context manually
                 if (audioContext.state === 'suspended') {
                     await audioContext.resume();
                 }
 
-                // 3. Request Mic
+                // Request microphone access
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const source = audioContext.createMediaStreamSource(stream);
                 const analyserNode = audioContext.createAnalyser();
                 
                 source.connect(analyserNode);
                 
-                // 4. BPM Analysis
-                const bpmEngine = new realtimeBpmAnalyzer.RealTimeBpmAnalyzer();
+                // Initialize BPM Analyzer (Handling both UMD and modern export patterns)
+                const analyzerClass = window.realtimeBpmAnalyzer?.RealTimeBpmAnalyzer || window.RealTimeBpmAnalyzer;
+                if (!analyzerClass) throw new Error("Library not loaded");
+                
+                const bpmEngine = new analyzerClass();
                 source.connect(bpmEngine.node);
 
                 bpmEngine.on('bpm', (data) => {
-                    const tempo = Math.round(data.bpm[0].tempo);
-                    display.innerText = tempo;
-                    display.classList.add('active-beat');
-                    setTimeout(() => display.classList.remove('active-beat'), 100);
+                    if (data.bpm && data.bpm.length > 0) {
+                        const tempo = Math.round(data.bpm[0].tempo);
+                        display.innerText = tempo;
+                        display.classList.add('active-beat');
+                        setTimeout(() => display.classList.remove('active-beat'), 100);
+                    }
                 });
 
                 status.innerText = "Analyzing live...";
                 btn.style.display = 'none';
 
-                // 5. Visualizer
+                // Visualization Loop
                 function draw() {
                     requestAnimationFrame(draw);
                     const array = new Uint8Array(analyserNode.frequencyBinCount);
@@ -74,8 +80,9 @@
                 draw();
 
             } catch (err) {
+                console.error(err);
                 status.innerText = "Error: " + err.message;
-                alert("Please ensure you have given microphone permissions.");
+                alert("Could not start microphone. Ensure you are using HTTPS and granted permission.");
             }
         };
     </script>
