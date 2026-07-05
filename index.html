@@ -1,1 +1,30 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h1>My BPM Counter</h1>
+    <div id="bpm-display">BPM: --</div>
+    <button id="start-btn">Start Microphone</button>
 
+    <script src="https://cdn.jsdelivr.net/npm/realtime-bpm-analyzer/dist/index.min.js"></script>
+    <script>
+        const btn = document.getElementById('start-btn');
+        const display = document.getElementById('bpm-display');
+
+        btn.addEventListener('click', async () => {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            
+            // This initializes the analyzer from the library
+            const analyzer = new realtimeBpmAnalyzer.RealTimeBpmAnalyzer();
+            
+            analyzer.on('bpm', (data) => {
+                display.innerText = "BPM: " + Math.round(data.bpm[0].tempo);
+            });
+
+            source.connect(analyzer.node);
+            btn.innerText = "Listening...";
+        });
+    </script>
+</body>
+</html>
