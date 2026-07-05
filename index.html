@@ -1,278 +1,65 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Live BPM Counter</title>
-<style>
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width:900px; margin:24px auto; padding:0 16px; color:#111; }
-  h1 { margin:0 0 8px 0; }
-  .card { border:1px solid #e3e3e3; padding:16px; border-radius:8px; margin-top:12px; background:#fff; }
-  .big { font-size:48px; font-weight:700; letter-spacing:1px; }
-  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-  button { padding:10px 14px; font-size:16px; border-radius:6px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; }
-  button.primary { background:#0077ff; color:#fff; border-color: #0066dd; }
-  .small { font-size:14px; padding:8px 10px; }
-  label { display:flex; gap:8px; align-items:center; font-size:14px; }
-  input[type=range] { width:180px; }
-  #canvas { width:100%; height:80px; background:#0f1720; display:block; border-radius:6px; margin-top:12px; }
-  .meta { display:flex; gap:16px; margin-top:8px; flex-wrap:wrap; }
-  .note { color:#555; font-size:13px; margin-top:8px; }
-  .history { margin-top:8px; font-size:13px; color:#333; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live BPM Monitor</title>
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        #bpm-display { font-size: 8rem; font-weight: 900; color: #00ff88; margin: 20px 0; }
+        #visualizer { width: 100%; height: 100px; background: #111; margin-bottom: 20px; }
+        .pulse { animation: pulse 0.15s ease-out; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        .btn { padding: 20px 40px; font-size: 20px; border-radius: 50px; border: none; background: #00ff88; cursor: pointer; }
+    </style>
 </head>
 <body>
-  <h1>Live BPM Counter</h1>
-  <div class="card">
-    <div>Current BPM</div>
-    <div id="bpm" class="big">—</div>
+    <h1>Vinyl BPM Monitor</h1>
+    <div id="bpm-display">--</div>
+    <canvas id="visualizer"></canvas>
+    <button id="start-btn" class="btn">Start Monitoring</button>
 
-    <div class="controls">
-      <button id="tapBtn" class="primary">Tap</button>
-      <button id="resetTap" class="small">Reset Tap</button>
+    <script src="https://cdn.jsdelivr.net/npm/realtime-bpm-analyzer/dist/index.min.js"></script>
+    <script>
+        const btn = document.getElementById('start-btn');
+        const display = document.getElementById('bpm-display');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        
+        btn.onclick = async () => {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
 
-      <button id="micBtn" class="small">Start Mic</button>
-      <button id="resetMic" class="small">Reset Mic</button>
+            const bpmEngine = new RealTimeBpmAnalyzer();
+            source.connect(bpmEngine.node);
 
-      <label>
-        Sensitivity
-        <input id="sensitivity" type="range" min="1.2" max="6" step="0.1" value="2.3">
-      </label>
+            bpmEngine.on('bpm', (data) => {
+                if (data.bpm.length > 0) {
+                    const bpm = Math.round(data.bpm[0].tempo);
+                    display.innerText = bpm;
+                    display.classList.add('pulse');
+                    setTimeout(() => display.classList.remove('pulse'), 100);
+                }
+            });
 
-      <label>
-        Smoothing
-        <input id="smoothing" type="range" min="0" max="0.95" step="0.05" value="0.85">
-      </label>
-    </div>
+            btn.style.display = 'none';
 
-    <canvas id="canvas" width="800" height="80"></canvas>
-
-    <div class="meta">
-      <div>Tap count: <span id="tapCount">0</span></div>
-      <div>Mic hits: <span id="micCount">0</span></div>
-      <div>Source: <span id="source">none</span></div>
-    </div>
-
-    <div class="history">
-      Last intervals (ms): <span id="intervals">—</span>
-    </div>
-
-    <div class="note">
-      Notes: Microphone requires HTTPS (or localhost). Allow microphone access when prompted. Tap the big "Tap" button or press Spacebar.
-    </div>
-  </div>
-
-<script>
-(() => {
-  // Utility
-  const el = id => document.getElementById(id);
-  const bpmEl = el('bpm');
-  const tapBtn = el('tapBtn');
-  const resetTap = el('resetTap');
-  const micBtn = el('micBtn');
-  const resetMic = el('resetMic');
-  const sensitivityInput = el('sensitivity');
-  const smoothingInput = el('smoothing');
-  const sourceEl = el('source');
-  const tapCountEl = el('tapCount');
-  const micCountEl = el('micCount');
-  const intervalsEl = el('intervals');
-
-  // Tap tempo
-  let taps = [];
-  const MAX_TAPS = 12;
-  function onTap(now = performance.now()) {
-    taps.push(now);
-    if (taps.length > MAX_TAPS) taps.shift();
-    updateTapBpm();
-  }
-  function updateTapBpm() {
-    if (taps.length < 2) {
-      bpmEl.textContent = '—';
-      tapCountEl.textContent = taps.length;
-      intervalsEl.textContent = '—';
-      return;
-    }
-    const diffs = [];
-    for (let i = 1; i < taps.length; i++) diffs.push(taps[i]-taps[i-1]);
-    const avg = diffs.reduce((a,b)=>a+b,0)/diffs.length;
-    const bpm = 60000 / avg;
-    setDisplayedBpm(bpm, 'tap');
-    tapCountEl.textContent = taps.length;
-    intervalsEl.textContent = diffs.map(d=>Math.round(d)).join(', ');
-  }
-  function resetTapData() {
-    taps = [];
-    updateTapBpm();
-  }
-
-  // Display logic with smoothing (keeps value stable)
-  let displayedBpm = null;
-  let displaySource = 'none';
-  let smoothBpm = null;
-  function setDisplayedBpm(value, source) {
-    if (!isFinite(value) || value <= 0) return;
-    displaySource = source;
-    sourceEl.textContent = source;
-    if (smoothBpm == null) smoothBpm = value;
-    const smoothing = parseFloat(smoothingInput.value) || 0.85;
-    smoothBpm = smoothBpm * smoothing + value * (1 - smoothing);
-    displayedBpm = Math.round(smoothBpm);
-    bpmEl.textContent = displayedBpm;
-  }
-
-  // Microphone beat detection (simple energy-based onset detection)
-  let audioCtx = null;
-  let analyser = null;
-  let micStream = null;
-  let rafId = null;
-  let prevEnergy = 0;
-  let lastOnset = 0;
-  const minOnsetGap = 220; // ms, avoid multiple triggers
-  let micHits = [];
-  function startMic() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert('getUserMedia not supported in this browser.');
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        micStream = stream;
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const src = audioCtx.createMediaStreamSource(stream);
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-        src.connect(analyser);
-        prevEnergy = 0;
-        lastOnset = 0;
-        micHits = [];
-        micCountEl.textContent = 0;
-        sourceEl.textContent = 'mic';
-        micBtn.textContent = 'Stop Mic';
-        loopAnalyze();
-      })
-      .catch(err => {
-        console.error('Microphone error', err);
-        alert('Microphone access denied or error: ' + err.message);
-      });
-  }
-
-  function stopMic() {
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = null;
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-    if (audioCtx) {
-      audioCtx.close();
-      audioCtx = null;
-      analyser = null;
-    }
-    micBtn.textContent = 'Start Mic';
-    sourceEl.textContent = 'none';
-  }
-
-  const canvas = el('canvas');
-  const ctx = canvas.getContext('2d');
-
-  function loopAnalyze() {
-    if (!analyser) return;
-    const buf = new Float32Array(analyser.fftSize);
-    analyser.getFloatTimeDomainData(buf);
-    // waveform drawing
-    drawWave(buf);
-    // simple energy onset detection
-    let energy = 0;
-    for (let i=0;i<buf.length;i++) energy += buf[i]*buf[i];
-    energy = energy / buf.length; // RMS squared
-    // adaptive threshold
-    const sensitivity = parseFloat(sensitivityInput.value) || 2.3;
-    const now = performance.now();
-    // when energy rises abruptly relative to running previous energy, it's likely an onset
-    if (energy > prevEnergy * sensitivity && energy > 0.00002 && (now - lastOnset) > minOnsetGap) {
-      // record a hit
-      micHits.push(now);
-      if (micHits.length > MAX_TAPS) micHits.shift();
-      lastOnset = now;
-      micCountEl.textContent = micHits.length;
-      updateMicBpm();
-    }
-    // smooth prevEnergy (running average)
-    prevEnergy = prevEnergy * 0.92 + energy * 0.08;
-    rafId = requestAnimationFrame(loopAnalyze);
-  }
-
-  function updateMicBpm() {
-    if (micHits.length < 2) {
-      return;
-    }
-    const diffs = [];
-    for (let i=1;i<micHits.length;i++) diffs.push(micHits[i]-micHits[i-1]);
-    const avg = diffs.reduce((a,b)=>a+b,0)/diffs.length;
-    const bpm = 60000/avg;
-    setDisplayedBpm(bpm, 'mic');
-  }
-
-  function resetMicData() {
-    micHits = [];
-    micCountEl.textContent = 0;
-  }
-
-  // Canvas draw
-  function drawWave(buf) {
-    const w = canvas.width = canvas.clientWidth * devicePixelRatio;
-    const h = canvas.height = canvas.clientHeight * devicePixelRatio;
-    ctx.clearRect(0,0,w,h);
-    ctx.lineWidth = 2 * devicePixelRatio;
-    ctx.strokeStyle = '#00d4ff';
-    ctx.beginPath();
-    const step = Math.max(1, Math.floor(buf.length / w));
-    for (let i = 0; i < w; i++) {
-      const idx = Math.floor(i * buf.length / w);
-      const v = buf[idx] || 0;
-      const y = (1 - (v * 0.5 + 0.5)) * h;
-      if (i === 0) ctx.moveTo(i, y); else ctx.lineTo(i, y);
-    }
-    ctx.stroke();
-
-    // draw energy bar
-    const energy = buf.reduce((s,v)=>s+v*v,0)/buf.length;
-    ctx.fillStyle = '#ffffff22';
-    const barW = Math.max(2, Math.min(w, energy * 2000000));
-    ctx.fillRect(0, h - 6 * devicePixelRatio, barW, 4 * devicePixelRatio);
-  }
-
-  // Keyboard: space to tap
-  window.addEventListener('keydown', e => {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      onTap();
-    }
-  });
-
-  // Wire up UI
-  tapBtn.addEventListener('click', () => onTap());
-  resetTap.addEventListener('click', () => { resetTapData(); });
-
-  micBtn.addEventListener('click', () => {
-    if (micStream) stopMic();
-    else startMic();
-  });
-  resetMic.addEventListener('click', () => { resetMicData(); });
-
-  // keep canvas responsive
-  window.addEventListener('resize', () => { if (analyser) { /* redraw */ } });
-
-  // Initial placeholders
-  updateTapBpm();
-
-  // Expose for debugging if needed
-  window._bpmUI = {
-    tapNow: onTap,
-    startMic, stopMic, resetMicData, resetTapData
-  };
-})();
-</script>
+            function draw() {
+                requestAnimationFrame(draw);
+                const data = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(data);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#00ff88';
+                for(let i = 0; i < data.length; i++) {
+                    ctx.fillRect(i * 3, canvas.height - data[i]/2, 2, data[i]/2);
+                }
+            }
+            draw();
+        };
+    </script>
 </body>
 </html>
