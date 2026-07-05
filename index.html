@@ -2,82 +2,57 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Professional BPM Analyzer</title>
+    <title>Pro BPM Analyzer</title>
     <style>
-        body { background: #0f0f0f; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; }
-        #canvas { width: 100%; max-width: 800px; height: 200px; background: #000; margin: 20px 0; border: 1px solid #333; }
-        #bpm-display { font-size: 4rem; font-weight: bold; color: #00ffcc; margin-top: 20px; }
-        .controls { margin-top: 20px; }
-        button { padding: 15px 30px; font-size: 1.2rem; cursor: pointer; background: #00ffcc; border: none; border-radius: 5px; font-weight: bold; }
-        button:disabled { background: #555; cursor: not-allowed; }
+        body { background: #121212; color: #ffffff; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        #canvas { width: 90%; max-width: 800px; height: 200px; background: #000; border: 1px solid #333; border-radius: 8px; }
+        #bpm-display { font-size: 5rem; font-weight: 800; color: #00ffcc; margin: 20px 0; text-shadow: 0 0 20px rgba(0,255,204,0.5); }
+        .controls { display: flex; gap: 10px; margin-top: 20px; }
+        select, button { padding: 12px 20px; border-radius: 5px; border: none; background: #333; color: #fff; cursor: pointer; }
+        button { background: #00ffcc; color: #000; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>BPM Analyzer</h1>
-    <div id="bpm-display" aria-live="polite">-- BPM</div>
+    <div id="bpm-display">-- BPM</div>
     <canvas id="canvas"></canvas>
     <div class="controls">
-        <button id="start-btn">Start Microphone</button>
+        <select id="audioSource"></select>
+        <button id="startBtn">Start Analysis</button>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/realtime-bpm-analyzer/dist/index.min.js"></script>
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const audioSource = document.getElementById('audioSource');
         const startBtn = document.getElementById('start-btn');
         const bpmDisplay = document.getElementById('bpm-display');
+        let audioContext, stream;
 
-        let audioContext, analyser, dataArray, stream;
-
-        function resizeCanvas() {
-            canvas.width = canvas.clientWidth;
-            canvas.height = canvas.clientHeight;
+        // Populate device list
+        async function getDevices() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            devices.filter(d => d.kind === 'audioinput').forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.deviceId;
+                opt.text = d.label || `Microphone ${audioSource.length + 1}`;
+                audioSource.add(opt);
+            });
         }
-        window.addEventListener("resize", resizeCanvas);
-        resizeCanvas();
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(getDevices);
 
-        startBtn.addEventListener('click', async () => {
-            try {
-                startBtn.disabled = true;
-                startBtn.innerText = "Requesting microphone...";
-                
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                const source = audioContext.createMediaStreamSource(stream);
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048;
-                analyser.smoothingTimeConstant = 0.8;
-                source.connect(analyser);
-                
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-                
-                startBtn.innerText = "Listening...";
-                draw();
-            } catch (err) {
-                console.error("Error accessing microphone:", err);
-                startBtn.innerText = "Error: Check Permissions";
-                startBtn.disabled = false;
-            }
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            audioContext = new AudioContext();
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { deviceId: { exact: audioSource.value } } 
+            });
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyzer = new RealTimeBPMAnalyzer({ continuousAnalysis: true });
+            
+            source.connect(analyzer);
+            analyzer.on('bpm', (event) => {
+                bpmDisplay.innerText = Math.round(event.bpm) + " BPM";
+            });
         });
-
-        function draw() {
-            if (!analyser) return;
-            requestAnimationFrame(draw);
-            analyser.getByteFrequencyData(dataArray);
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            const step = Math.floor(dataArray.length / 32);
-            const barWidth = canvas.width / 32;
-            
-            for (let i = 0; i < 32; i++) {
-                const val = dataArray[i * step];
-                ctx.fillStyle = '#00ffcc';
-                ctx.fillRect(i * barWidth, canvas.height - val/2, barWidth - 2, val/2);
-            }
-        }
     </script>
 </body>
 </html>
