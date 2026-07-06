@@ -4,115 +4,225 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0a0d0c">
-<title>Not Quite My Tempo — BPM + Key</title>
+<meta name="theme-color" content="#0f0d0a">
+<title>Not Quite My Tempo — BPM · Tuner</title>
 <style>
   :root{
-    --bg:#0a0d0c;
-    --line:#1f2624;
-    --silk:#c9d2ce;
-    --dim:#5c6a65;
-    --phos:#00ff88;
-    --phos-soft:#7dffc4;
-    --amber:#ffb454;
-    --red:#ff5f56;
-    --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --room:#0f0d0a;            /* the dark shelf the unit sits on */
+    --face:#ece3d0;            /* faceplate cream */
+    --face-hi:#f4ecdc;
+    --face-lo:#ddd1b8;
+    --face-edge:#c4b79b;
+    --ink:#2a2317;             /* silkscreen ink */
+    --ink-soft:#8a7f6a;
+    --glass:#0b100d;           /* recessed display window */
+    --glass-edge:#221d13;
+    --phos:#2bff90;            /* phosphor readout */
+    --phos-soft:#8fffc6;
+    --amber:#e8871e;
+    --red:#d6473c;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%}
+  html,body{min-height:100%}
   body{
-    background:var(--bg);color:var(--silk);font-family:var(--sans);
-    display:flex;flex-direction:column;align-items:center;
-    padding:20px 16px 40px;-webkit-font-smoothing:antialiased;
+    background:var(--room);
+    color:var(--ink);font-family:var(--sans);
+    display:flex;justify-content:center;
+    padding:24px 14px 48px;-webkit-font-smoothing:antialiased;
   }
   #glow{
     position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0;
-    background:radial-gradient(ellipse 70% 45% at 50% 34%,rgba(0,255,136,.13),transparent 70%);
+    background:radial-gradient(ellipse 75% 50% at 50% 40%,rgba(43,255,144,.10),transparent 70%);
   }
-  #app{position:relative;z-index:1;width:100%;max-width:460px;display:none;
-       flex-direction:column;align-items:center;gap:0}
 
-  #hdr{width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-  #hdr h1{font-size:10px;font-weight:600;letter-spacing:.32em;text-transform:uppercase;color:var(--dim)}
-  .lamp{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--silk)}
-  .lamp i{width:8px;height:8px;border-radius:50%;background:#2a3330;flex:none;transition:background .2s,box-shadow .2s}
-  .lamp.paused    i{background:#2a3330}
-  .lamp.nosignal  i,.lamp.listening i{background:var(--amber);box-shadow:0 0 8px rgba(255,180,84,.7)}
-  .lamp.tracking  i{background:#9fb4ac;box-shadow:0 0 8px rgba(159,180,172,.6)}
-  .lamp.locked    i{background:var(--phos);box-shadow:0 0 10px rgba(0,255,136,.9)}
+  /* ============ faceplate ============ */
+  #app{
+    position:relative;z-index:1;width:100%;max-width:480px;display:none;
+    background:linear-gradient(180deg,var(--face-hi),var(--face) 30%,var(--face-lo));
+    border:1px solid var(--face-edge);
+    border-radius:14px;
+    box-shadow:0 30px 70px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.6), inset 0 -2px 0 rgba(0,0,0,.08);
+    padding:18px 18px 20px;
+  }
+
+  #hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  #hdr h1{font-size:11px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:var(--ink)}
+  #hdr h1 em{font-style:normal;color:var(--ink-soft)}
+  .lamp{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink)}
+  .lamp i{width:9px;height:9px;border-radius:50%;background:#b7ab8f;border:1px solid rgba(0,0,0,.2);flex:none;transition:background .2s,box-shadow .2s}
+  .lamp.paused    i{background:#b7ab8f}
+  .lamp.listening i{background:var(--amber);box-shadow:0 0 8px rgba(232,135,30,.8)}
+  .lamp.nosignal  i{background:var(--red);box-shadow:0 0 8px rgba(214,71,60,.8)}
+  .lamp.tracking  i{background:#8fa89b;box-shadow:0 0 6px rgba(143,168,155,.7)}
+  .lamp.locked    i{background:var(--phos);box-shadow:0 0 9px rgba(43,255,144,.9)}
+  .lamp.intune    i{background:var(--phos);box-shadow:0 0 9px rgba(43,255,144,.9)}
 
   #device{
-    width:100%;background:#0c1110;color:var(--dim);
-    border:1px solid var(--line);border-radius:6px;
-    font-family:var(--mono);font-size:11px;padding:7px 10px;cursor:pointer;
+    width:100%;background:var(--face-hi);color:var(--ink);
+    border:1px solid var(--face-edge);border-radius:7px;
+    font-family:var(--mono);font-size:11px;padding:8px 10px;cursor:pointer;margin-bottom:12px;
   }
-  #device:focus-visible{outline:2px solid var(--phos);outline-offset:1px}
+  #device:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 
+  /* ---- mode keys (receiver preset buttons) ---- */
+  #moderow{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  #modes{
+    display:flex;flex:1;border:1px solid var(--face-edge);border-radius:8px;overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.12);
+  }
+  .modekey{
+    flex:1;padding:11px 0;font-family:var(--sans);font-size:11px;font-weight:700;
+    letter-spacing:.24em;text-transform:uppercase;
+    background:var(--face-hi);color:var(--ink-soft);border:none;cursor:pointer;
+  }
+  .modekey + .modekey{border-left:1px solid var(--face-edge)}
+  .modekey[aria-pressed="true"]{
+    background:var(--ink);color:var(--face-hi);
+    box-shadow:inset 0 2px 5px rgba(0,0,0,.5);
+  }
+  .modekey:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}
+  #keytoggle{
+    display:flex;align-items:center;gap:7px;
+    padding:10px 13px;border:1px solid var(--face-edge);border-radius:8px;
+    background:var(--face-hi);cursor:pointer;
+    font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);
+  }
+  #keytoggle i{width:8px;height:8px;border-radius:50%;background:#b7ab8f;border:1px solid rgba(0,0,0,.2)}
+  #keytoggle[aria-pressed="true"]{color:var(--ink)}
+  #keytoggle[aria-pressed="true"] i{background:var(--phos);box-shadow:0 0 7px rgba(43,255,144,.9)}
+  #keytoggle:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+
+  /* ---- display window (the glass) ---- */
+  #window{
+    background:var(--glass);
+    border:1px solid var(--glass-edge);
+    border-radius:12px;
+    box-shadow:inset 0 3px 10px rgba(0,0,0,.75), inset 0 0 46px rgba(0,0,0,.45);
+    padding:26px 18px 22px;
+    text-align:center;
+    transition:box-shadow .3s;
+    min-height:250px;
+    display:flex;flex-direction:column;justify-content:center;
+  }
+  #window.lit{
+    box-shadow:inset 0 3px 10px rgba(0,0,0,.75), inset 0 0 46px rgba(0,0,0,.45),
+               0 0 26px rgba(43,255,144,.22);
+  }
+
+  /* tempo view */
   #bpm{
-    margin-top:26px;
     font-family:var(--mono);font-variant-numeric:tabular-nums;
-    font-size:clamp(88px,26vw,132px);font-weight:700;line-height:1;
-    color:var(--phos);text-shadow:0 0 18px rgba(0,255,136,.35);
-    will-change:transform,text-shadow;user-select:none;
+    font-size:clamp(74px,21vw,112px);font-weight:700;line-height:1;
+    color:var(--phos);text-shadow:0 0 16px rgba(43,255,144,.35);
+    will-change:text-shadow;user-select:none;
   }
-  #subrow{display:flex;align-items:center;gap:10px;margin-top:8px}
-  #subrow .unit{font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--dim)}
+  #subrow{display:flex;justify-content:center;align-items:center;gap:10px;margin-top:10px}
+  #subrow .unit{font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:rgba(143,255,198,.5)}
   .mini{
-    background:transparent;border:1px solid var(--line);border-radius:5px;
-    color:var(--silk);font-family:var(--mono);font-size:11px;padding:3px 8px;cursor:pointer;
+    background:transparent;border:1px solid rgba(143,255,198,.25);border-radius:5px;
+    color:var(--phos-soft);font-family:var(--mono);font-size:11px;padding:4px 9px;cursor:pointer;
   }
-  .mini:hover{border-color:#33403b}
-  .mini.on{color:var(--phos);border-color:#0a5c38}
+  .mini:hover{border-color:rgba(143,255,198,.5)}
+  .mini.on{color:var(--glass);background:var(--phos);border-color:var(--phos)}
   .mini:focus-visible{outline:2px solid var(--phos);outline-offset:1px}
-
-  #key{
-    margin-top:20px;font-family:var(--mono);font-size:22px;letter-spacing:.08em;
-    color:var(--phos-soft);min-height:28px;font-variant-numeric:tabular-nums;
+  #keyline{
+    margin-top:16px;font-family:var(--mono);font-size:17px;letter-spacing:.08em;
+    color:var(--phos-soft);min-height:24px;display:none;
   }
-  #key.pending{color:var(--dim);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
-  #key .cam{
-    margin-left:10px;font-size:13px;color:var(--bg);background:var(--phos-soft);
-    border-radius:4px;padding:2px 7px;vertical-align:3px;font-weight:700;
+  #keyline.pending{color:rgba(143,255,198,.4);font-size:11px;letter-spacing:.22em;text-transform:uppercase}
+  #keyline .cam{
+    margin-left:9px;font-size:12px;color:var(--glass);background:var(--phos-soft);
+    border-radius:4px;padding:2px 6px;vertical-align:2px;font-weight:700;
   }
 
+  /* tuner view */
+  #tunerView{display:none}
+  #tnrow{display:flex;align-items:baseline;justify-content:center;gap:6px}
+  #tnote{
+    font-family:var(--mono);font-size:clamp(64px,18vw,92px);font-weight:700;line-height:1;
+    color:var(--phos);text-shadow:0 0 16px rgba(43,255,144,.35);
+  }
+  #toct{font-family:var(--mono);font-size:26px;color:rgba(143,255,198,.55)}
+  #tcents{
+    margin-top:6px;font-family:var(--mono);font-size:15px;letter-spacing:.08em;
+    color:var(--phos-soft);min-height:20px;font-variant-numeric:tabular-nums;
+  }
+  #needle{width:100%;height:112px;margin-top:8px}
+  #thint{
+    margin-top:2px;font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+    color:rgba(143,255,198,.5);min-height:14px;
+  }
+  #strings{display:flex;justify-content:center;gap:14px;margin-top:16px}
+  #strings span{
+    font-family:var(--mono);font-size:13px;color:rgba(143,255,198,.3);
+    padding:3px 7px;border:1px solid rgba(143,255,198,.14);border-radius:5px;
+    transition:color .15s,border-color .15s,background .15s;
+  }
+  #strings span sub{font-size:8px}
+  #strings span.on{color:var(--phos-soft);border-color:rgba(143,255,198,.5)}
+  #strings span.intune{color:var(--glass);background:var(--phos);border-color:var(--phos)}
+
+  /* ---- deck row: platter + level ---- */
+  #deck{display:flex;align-items:center;gap:18px;margin-top:16px}
   #disc{
-    margin-top:34px;width:172px;height:172px;border-radius:50%;
-    background:#0c1110;border:1px solid var(--line);
-    box-shadow:0 0 0 6px rgba(0,255,136,.06), inset 0 1px 0 rgba(255,255,255,.04);
-    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    width:104px;height:104px;flex:none;border-radius:50%;cursor:pointer;
+    background:
+      radial-gradient(circle at 50% 50%, var(--face-hi) 0 17%, transparent 17.5%),
+      repeating-radial-gradient(circle at 50% 50%, #14110c 0 2px, #1d1913 2px 4px);
+    border:2px solid var(--face-edge);
+    box-shadow:0 4px 10px rgba(0,0,0,.35), inset 0 0 12px rgba(0,0,0,.6);
+    display:flex;align-items:center;justify-content:center;
     will-change:transform;transition:opacity .2s;
   }
-  #disc:focus-visible{outline:2px solid var(--phos);outline-offset:4px}
+  #disc:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
   #disc.paused{opacity:.45}
-  #wave{width:120px;height:44px}
-  #dischint{margin-top:12px;font-size:9px;letter-spacing:.26em;text-transform:uppercase;color:#3a4642}
+  #wave{width:64px;height:26px;position:relative;z-index:1}
+  #deckright{flex:1;display:flex;flex-direction:column;gap:8px}
+  #dischint{font-size:9px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-soft)}
+  #lvlrow{display:flex;align-items:center;gap:10px}
+  #lvltrack{
+    flex:1;height:8px;background:#d3c7ab;border-radius:4px;overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.25);
+  }
+  #lvlfill{height:100%;width:0%;background:var(--phos);border-radius:4px}
+  #lvldb{font-family:var(--mono);font-size:10px;color:var(--ink-soft);width:56px;text-align:right}
+  #warn{margin-top:4px;font-size:11px;color:#a8571c;min-height:15px}
 
-  #lvlrow{display:flex;align-items:center;gap:10px;margin-top:26px;width:100%;max-width:300px}
-  #lvltrack{flex:1;height:6px;background:#1a211f;border-radius:3px;overflow:hidden}
-  #lvlfill{height:100%;width:0%;background:var(--phos);border-radius:3px}
-  #lvldb{font-family:var(--mono);font-size:10px;color:var(--dim);width:56px;text-align:right}
-  #warn{margin-top:12px;font-size:12px;color:var(--amber);min-height:16px;text-align:center}
+  footer{
+    margin-top:14px;text-align:center;
+    font-size:8px;letter-spacing:.24em;text-transform:uppercase;color:#a99d82;
+  }
 
-  footer{margin-top:26px;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:#3a4642;text-align:center}
-
+  /* ============ start overlay ============ */
   #overlay{
     position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:18px;text-align:center;
-    background:var(--bg);padding:24px;
+    align-items:center;justify-content:center;gap:20px;text-align:center;
+    background:var(--room);padding:24px;
   }
-  #overlay h2{font-size:12px;font-weight:600;letter-spacing:.34em;text-transform:uppercase;color:var(--silk)}
-  #overlay p{font-size:13px;color:var(--dim);max-width:320px;line-height:1.6}
+  #ocard{
+    background:linear-gradient(180deg,var(--face-hi),var(--face) 30%,var(--face-lo));
+    border:1px solid var(--face-edge);border-radius:14px;
+    box-shadow:0 30px 70px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.6);
+    padding:34px 30px;max-width:380px;width:100%;
+    display:flex;flex-direction:column;align-items:center;gap:16px;
+  }
+  #ocard h2{font-size:12px;font-weight:700;letter-spacing:.32em;text-transform:uppercase;color:var(--ink)}
+  #ocard p{font-size:13px;color:var(--ink-soft);line-height:1.6}
   #startbtn{
-    width:150px;height:150px;border-radius:50%;
-    font-family:var(--mono);font-size:14px;letter-spacing:.12em;font-weight:700;
-    color:#04140c;background:var(--phos);border:none;cursor:pointer;
-    box-shadow:0 0 40px rgba(0,255,136,.35);
+    width:132px;height:132px;border-radius:50%;
+    font-family:var(--mono);font-size:14px;letter-spacing:.14em;font-weight:700;
+    color:var(--phos);background:var(--glass);
+    border:1px solid var(--glass-edge);cursor:pointer;
+    box-shadow:inset 0 3px 10px rgba(0,0,0,.7), 0 0 30px rgba(43,255,144,.25);
+    text-shadow:0 0 10px rgba(43,255,144,.5);
   }
-  #startbtn:hover{box-shadow:0 0 56px rgba(0,255,136,.55)}
-  #err{color:var(--red);font-size:12px;max-width:360px;line-height:1.5;display:none}
+  #startbtn:hover{box-shadow:inset 0 3px 10px rgba(0,0,0,.7), 0 0 44px rgba(43,255,144,.4)}
+  #startbtn:focus-visible{outline:2px solid var(--phos);outline-offset:3px}
+  #err{color:var(--red);font-size:12px;max-width:340px;line-height:1.5;display:none}
 
-  @media (prefers-reduced-motion:reduce){ #bpm,#disc{transform:none !important} }
+  @media (prefers-reduced-motion:reduce){ #disc{transform:none !important} }
 </style>
 </head>
 <body>
@@ -121,39 +231,70 @@
 
 <div id="app">
   <div id="hdr">
-    <h1>Not Quite My Tempo</h1>
+    <h1>Not Quite <em>My Tempo</em></h1>
     <div class="lamp listening" id="lamp"><i></i><span id="lamptext">LISTENING</span></div>
   </div>
+
   <select id="device" aria-label="Audio input device"></select>
 
-  <div id="bpm">---</div>
-  <div id="subrow">
-    <span class="unit">BPM</span>
-    <button class="mini" id="half" title="Show half tempo">÷2</button>
-    <button class="mini" id="dbl" title="Show double tempo">×2</button>
+  <div id="moderow">
+    <div id="modes" role="group" aria-label="Mode">
+      <button class="modekey" id="mTempo" aria-pressed="true">Tempo</button>
+      <button class="modekey" id="mTuner" aria-pressed="false">Tuner</button>
+    </div>
+    <button id="keytoggle" aria-pressed="false" title="Show musical key (needs ~20 s of melodic audio)">
+      <i></i>Key
+    </button>
   </div>
 
-  <div id="key" class="pending">Listening for key…</div>
+  <div id="window">
+    <div id="tempoView">
+      <div id="bpm">---</div>
+      <div id="subrow">
+        <span class="unit">BPM</span>
+        <button class="mini" id="half" title="Show half tempo">÷2</button>
+        <button class="mini" id="dbl" title="Show double tempo">×2</button>
+      </div>
+      <div id="keyline" class="pending">Listening for key…</div>
+    </div>
 
-  <div id="disc" role="button" tabindex="0" aria-label="Pause or resume">
-    <canvas id="wave"></canvas>
+    <div id="tunerView">
+      <div id="tnrow"><span id="tnote">–</span><span id="toct"></span></div>
+      <div id="tcents">&nbsp;</div>
+      <canvas id="needle"></canvas>
+      <div id="thint">Play a string</div>
+      <div id="strings">
+        <span data-i="0">E<sub>2</sub></span><span data-i="1">A<sub>2</sub></span>
+        <span data-i="2">D<sub>3</sub></span><span data-i="3">G<sub>3</sub></span>
+        <span data-i="4">B<sub>3</sub></span><span data-i="5">E<sub>4</sub></span>
+      </div>
+    </div>
   </div>
-  <div id="dischint">Tap to pause</div>
 
-  <div id="lvlrow">
-    <div id="lvltrack"><div id="lvlfill"></div></div>
-    <span id="lvldb">-- dB</span>
+  <div id="deck">
+    <div id="disc" role="button" tabindex="0" aria-label="Pause or resume">
+      <canvas id="wave"></canvas>
+    </div>
+    <div id="deckright">
+      <span id="dischint">Tap platter to pause</span>
+      <div id="lvlrow">
+        <div id="lvltrack"><div id="lvlfill"></div></div>
+        <span id="lvldb">-- dB</span>
+      </div>
+      <div id="warn"></div>
+    </div>
   </div>
-  <div id="warn"></div>
 
-  <footer>spectral flux · autocorrelation · chromagram · zero dependencies</footer>
+  <footer>autocorrelation tempo · YIN pitch · chromagram key · zero dependencies</footer>
 </div>
 
 <div id="overlay">
-  <h2>Not Quite My Tempo</h2>
-  <p>Live BPM and key for the decks. One tap and it starts listening.</p>
-  <button id="startbtn">START</button>
-  <p id="err"></p>
+  <div id="ocard">
+    <h2>Not Quite My Tempo</h2>
+    <p>Live BPM for the decks, with a built-in guitar tuner. One tap and it starts listening.</p>
+    <button id="startbtn">START</button>
+    <p id="err"></p>
+  </div>
 </div>
 
 <script>
@@ -204,14 +345,12 @@ function median(a) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-/* ---------- tempo: autocorrelation of the onset envelope ----------
-   env: onset-strength samples at envRate Hz. Returns {bpm, conf} or null. */
+/* ---------- tempo: autocorrelation of the onset envelope ---------- */
 function tempoFromEnv(env, envRate, anchorBpm) {
   if (env.length < Math.floor(envRate * 4)) return null;   // need ≥4 s
   const A = Math.min(env.length, Math.floor(envRate * 16)); // analyze last 16 s
   const off = env.length - A;
   const seg = new Float32Array(A);
-  // Exponential recency weighting: last few seconds count more than second 16.
   const wts = new Float32Array(A);
   const tau = envRate * 7;
   let mean = 0, wsum = 0;
@@ -225,8 +364,8 @@ function tempoFromEnv(env, envRate, anchorBpm) {
   for (let i = 0; i < A; i++) { seg[i] -= mean; e0 += seg[i] * seg[i] * wts[i]; }
   if (e0 < 1e-9) return null;
 
-  const Lmin = Math.max(4, Math.round(envRate * 60 / 200));  // 200 BPM
-  const Lmax = Math.min(A - 4, Math.round(envRate * 60 / 60)); // 60 BPM
+  const Lmin = Math.max(4, Math.round(envRate * 60 / 200));
+  const Lmax = Math.min(A - 4, Math.round(envRate * 60 / 60));
   if (Lmax <= Lmin + 2) return null;
   const maxLag = Math.min(A - 1, Lmax * 3 + 2);
 
@@ -234,13 +373,10 @@ function tempoFromEnv(env, envRate, anchorBpm) {
   for (let L = Lmin; L <= maxLag; L++) {
     let s = 0;
     for (let i = 0; i < A - L; i++) s += seg[i] * seg[i + L] * wts[i + L];
-    acf[L] = (s / e0) * (A / (A - L));   // unbiased normalization
+    acf[L] = (s / e0) * (A / (A - L));
   }
 
-  // Comb score against a wide, tempo-agnostic prior (dance-music range).
-  // This must stay neutral to real evidence — it only discourages
-  // implausible tempos (e.g. 300 BPM), it must never be strong enough to
-  // out-vote the actual audio.
+  // Comb score against a wide, tempo-agnostic prior.
   const score = new Float32Array(Lmax + 2);
   for (let L = Lmin; L <= Lmax; L++) {
     const bpm = 60 * envRate / L;
@@ -251,8 +387,7 @@ function tempoFromEnv(env, envRate, anchorBpm) {
     score[L] = s * prior;
   }
 
-  // Genuine local peaks only — avoids picking a noisy single-sample spike
-  // and gives real octave/ratio candidates to choose between.
+  // Genuine local peaks only.
   const peaks = [];
   for (let L = Lmin + 1; L < Lmax; L++) {
     if (score[L] >= score[L - 1] && score[L] >= score[L + 1] && score[L] > 0) {
@@ -264,10 +399,9 @@ function tempoFromEnv(env, envRate, anchorBpm) {
   const top = peaks.slice(0, 6);
   const topMax = top[0].s;
 
-  // Anchor is a bounded tie-breaker among the top candidates: a peak close
-  // to the current tempo (or a simple ratio of it) gets a modest boost, but
-  // it can only ever win against a peak that is at most ~1.6× stronger —
-  // real evidence still overrides a bad or stale lock.
+  // Anchor: bounded tie-breaker among top candidates. A peak near the
+  // current tempo (or a simple ratio of it) gets a modest boost, capped so
+  // real evidence still overrides a stale lock.
   let bestL = top[0].L, bestAdj = topMax;
   if (anchorBpm) {
     let a = anchorBpm;
@@ -287,9 +421,8 @@ function tempoFromEnv(env, envRate, anchorBpm) {
       if (adj > bestAdj) { bestAdj = adj; bestL = p.L; }
     }
   }
-  const best = topMax; // used below for confidence, pre-anchor magnitude
+  const best = topMax;
 
-  // Parabolic interpolation for sub-lag precision.
   let Lstar = bestL;
   if (bestL > Lmin && bestL < Lmax) {
     const a = score[bestL - 1], b = score[bestL], c = score[bestL + 1];
@@ -303,7 +436,76 @@ function tempoFromEnv(env, envRate, anchorBpm) {
   return { bpm: 60 * envRate / Lstar, conf };
 }
 
-/* ---------- key: Krumhansl-Schmuckler profiles + Camelot ---------- */
+/* ---------- pitch: YIN (de Cheveigné & Kawahara) ---------- */
+function yinPitch(buf, sr, fmin, fmax) {
+  const tauMin = Math.max(2, Math.floor(sr / fmax));
+  const tauMax = Math.min(Math.floor(sr / fmin), Math.floor(buf.length / 2) - 1);
+  if (tauMax <= tauMin + 2) return null;
+  const N = Math.floor(buf.length / 2);
+
+  // Difference function.
+  const d = new Float32Array(tauMax + 1);
+  for (let t = 1; t <= tauMax; t++) {
+    let s = 0;
+    for (let i = 0; i < N; i++) {
+      const diff = buf[i] - buf[i + t];
+      s += diff * diff;
+    }
+    d[t] = s;
+  }
+  // Cumulative-mean-normalized difference.
+  const cm = new Float32Array(tauMax + 1);
+  cm[0] = 1;
+  let run = 0;
+  for (let t = 1; t <= tauMax; t++) {
+    run += d[t];
+    cm[t] = run > 0 ? d[t] * t / run : 1;
+  }
+  // First dip below threshold, walked to its local minimum.
+  const TH = 0.12;
+  let tau = -1;
+  for (let t = tauMin; t <= tauMax; t++) {
+    if (cm[t] < TH) {
+      while (t + 1 <= tauMax && cm[t + 1] < cm[t]) t++;
+      tau = t;
+      break;
+    }
+  }
+  if (tau < 0) {
+    let mi = tauMin, mv = cm[tauMin];
+    for (let t = tauMin; t <= tauMax; t++) if (cm[t] < mv) { mv = cm[t]; mi = t; }
+    if (mv < 0.3) tau = mi; else return null;
+  }
+  // Parabolic interpolation for sub-sample period.
+  let betterTau = tau;
+  if (tau > 1 && tau < tauMax) {
+    const a = cm[tau - 1], b = cm[tau], c = cm[tau + 1];
+    const den = a - 2 * b + c;
+    if (den > 0) {
+      const dd = 0.5 * (a - c) / den;
+      if (dd > -1 && dd < 1) betterTau = tau + dd;
+    }
+  }
+  return { freq: sr / betterTau, clarity: 1 - cm[tau] };
+}
+
+const GUITAR_STRINGS = [
+  { n: 'E', o: 2, f: 82.4069 }, { n: 'A', o: 2, f: 110.0000 },
+  { n: 'D', o: 3, f: 146.8324 }, { n: 'G', o: 3, f: 195.9977 },
+  { n: 'B', o: 3, f: 246.9417 }, { n: 'E', o: 4, f: 329.6276 },
+];
+function nearestString(f) {
+  let best = null;
+  for (let i = 0; i < GUITAR_STRINGS.length; i++) {
+    const c = 1200 * Math.log2(f / GUITAR_STRINGS[i].f);
+    if (!best || Math.abs(c) < Math.abs(best.cents)) {
+      best = { idx: i, n: GUITAR_STRINGS[i].n, o: GUITAR_STRINGS[i].o, f: GUITAR_STRINGS[i].f, cents: c };
+    }
+  }
+  return best;
+}
+
+/* ---------- key: Krumhansl-Schmuckler + Camelot ---------- */
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const MAJ_PROF = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
 const MIN_PROF = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
@@ -354,18 +556,26 @@ function keyFromChroma(c) {
 const $ = id => document.getElementById(id);
 const ui = {
   app:$('app'), overlay:$('overlay'), start:$('startbtn'), err:$('err'),
-  glow:$('glow'), bpm:$('bpm'), key:$('key'),
+  glow:$('glow'), bpm:$('bpm'), keyline:$('keyline'),
   lamp:$('lamp'), lamptext:$('lamptext'), device:$('device'),
   half:$('half'), dbl:$('dbl'),
+  mTempo:$('mTempo'), mTuner:$('mTuner'), keytoggle:$('keytoggle'),
+  win:$('window'), tempoView:$('tempoView'), tunerView:$('tunerView'),
+  tnote:$('tnote'), toct:$('toct'), tcents:$('tcents'),
+  needle:$('needle'), thint:$('thint'),
+  strings:[...document.querySelectorAll('#strings span')],
   disc:$('disc'), wave:$('wave'), dischint:$('dischint'),
   lvlfill:$('lvlfill'), lvldb:$('lvldb'), warn:$('warn'),
 };
 const waveCtx = ui.wave.getContext('2d');
+const needleCtx = ui.needle.getContext('2d');
 
 /* ============================== STATE ============================== */
 let actx = null, stream = null, src = null, tapNode = null;
 let rawAn = null, lowAn = null, rawBuf = null, lowBuf = null;
 let running = false, paused = false, session = 0;
+let mode = 'tempo';              // 'tempo' | 'tuner'
+let keyOn = false;
 
 let DEC = 4, decSr = 11025, envRate = 172;
 const FLUX_N = 512, FLUX_HOP = 64;
@@ -377,7 +587,7 @@ const hannC = new Float32Array(CHROMA_N);
 for (let i = 0; i < FLUX_N; i++) hannF[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / FLUX_N);
 for (let i = 0; i < CHROMA_N; i++) hannC[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / CHROMA_N);
 
-const CAP = 1 << 17, MASK = CAP - 1;      // ~11–12 s of decimated PCM
+const CAP = 1 << 17, MASK = CAP - 1;
 const ring = new Float32Array(CAP);
 let wAbs = 0, fluxPos = 0, chromaPos = 0;
 let decSum = 0, decCnt = 0;
@@ -387,7 +597,7 @@ const cRe = new Float32Array(CHROMA_N), cIm = new Float32Array(CHROMA_N);
 let prevMag = new Float32Array(FLUX_N / 2 + 1);
 let curMag = new Float32Array(FLUX_N / 2 + 1);
 
-let env = [];                              // onset envelope
+let env = [];
 let displayBpm = null, conf = 0, mult = 1;
 let pendingBpm = null, pendingN = 0, pendingSum = 0;
 let lastCommitT = 0;
@@ -395,6 +605,11 @@ let lastCommitT = 0;
 const chromaAcc = new Float32Array(12);
 let tunX = 0, tunY = 0;
 let keyShown = null, keyCand = null, keyCandN = 0;
+
+const tunerBuf = new Float32Array(4096);
+let pitchHist = [];             // {f, t}
+let tunerTarget = null;         // {idx,n,o,f,cents}
+let tunerCents = 0, needleCents = 0, tunerLiveT = 0, tunerInTune = false;
 
 let bassSm = 0, curDb = -100, silenceSince = null;
 
@@ -433,7 +648,6 @@ async function startAudio(deviceId) {
   decSr = actx.sampleRate / DEC;
   envRate = decSr / FLUX_HOP;
 
-  // Raw feed: voice DSP (echo cancel / AGC / noise suppression) wrecks music.
   stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       deviceId: deviceId ? { exact: deviceId } : undefined,
@@ -447,7 +661,6 @@ async function startAudio(deviceId) {
   if (src) { try { src.disconnect(); } catch (e) {} }
   src = actx.createMediaStreamSource(stream);
 
-  // Visual-only analysers.
   rawAn = actx.createAnalyser(); rawAn.fftSize = 2048;
   const lp = actx.createBiquadFilter();
   lp.type = 'lowpass'; lp.frequency.value = 150; lp.Q.value = 1;
@@ -457,7 +670,6 @@ async function startAudio(deviceId) {
   rawBuf = new Float32Array(rawAn.fftSize);
   lowBuf = new Float32Array(lowAn.fftSize);
 
-  // PCM tap: AudioWorklet, ScriptProcessor as fallback.
   let ok = false;
   if (actx.audioWorklet) {
     try {
@@ -482,7 +694,7 @@ async function startAudio(deviceId) {
   resetAnalysis();
   running = true; paused = false;
   ui.disc.classList.remove('paused');
-  ui.dischint.textContent = 'Tap to pause';
+  ui.dischint.textContent = 'Tap platter to pause';
 
   requestAnimationFrame(function loop() {
     if (mySession !== session || !running) return;
@@ -499,9 +711,10 @@ function resetAnalysis() {
   pendingBpm = null; pendingN = 0; pendingSum = 0; lastCommitT = 0;
   chromaAcc.fill(0); tunX = 0; tunY = 0;
   keyShown = null; keyCand = null; keyCandN = 0;
+  pitchHist = []; tunerTarget = null; tunerInTune = false;
   silenceSince = null;
-  ui.key.className = 'pending';
-  ui.key.textContent = 'Listening for key…';
+  ui.keyline.className = 'pending';
+  ui.keyline.textContent = 'Listening for key…';
 }
 
 async function populateDevices() {
@@ -528,7 +741,6 @@ function ingest(chunk) {
       wAbs++; decSum = 0; decCnt = 0;
     }
   }
-  // Bound backlog after long tab sleeps.
   if (wAbs - fluxPos > CAP) fluxPos = wAbs - (CAP >> 1);
   if (wAbs - chromaPos > CAP) chromaPos = wAbs - (CAP >> 1);
   processFlux();
@@ -558,6 +770,7 @@ function processFlux() {
 }
 
 function processChroma() {
+  if (!keyOn) { chromaPos = wAbs; return; }   // key analysis is opt-in
   while (wAbs - chromaPos >= CHROMA_N) {
     for (let i = 0; i < CHROMA_N; i++) {
       cRe[i] = ring[(chromaPos + i) & MASK] * hannC[i];
@@ -565,7 +778,6 @@ function processChroma() {
     }
     fftChroma(cRe, cIm);
     const NB = CHROMA_N / 2;
-    // Spectral peaks only (cleaner harmonics than all bins).
     const peaks = [];
     let mPrev = 0, mCur = 0;
     for (let b = 2; b < NB; b++) {
@@ -578,7 +790,6 @@ function processChroma() {
       }
       mPrev = mCur; mCur = m;
     }
-    // Tuning offset (turntable pitch faders rarely sit at exactly A=440).
     tunX *= 0.99; tunY *= 0.99;
     for (const pk of peaks) {
       const frac = pk.p - Math.round(pk.p);
@@ -586,7 +797,6 @@ function processChroma() {
       tunY += pk.w * Math.sin(2 * Math.PI * frac);
     }
     const tuning = (tunX || tunY) ? Math.atan2(tunY, tunX) / (2 * Math.PI) : 0;
-    // Accumulate chroma with ~30 s memory.
     for (let i = 0; i < 12; i++) chromaAcc[i] *= 0.994;
     for (const pk of peaks) {
       const pc = ((Math.round(pk.p - tuning)) % 12 + 12) % 12;
@@ -602,19 +812,14 @@ setInterval(() => {
   const now = performance.now() / 1000;
   const signal = curDb > -50;
 
-  /* --- tempo ---
-     tempoFromEnv is handed the current committed BPM as an anchor so the
-     autocorrelation search itself resists flipping to a ½×/2×/3:2 neighbor.
-     On top of that, a raw estimate only overwrites the display once a
-     *different* reading has repeated consistently for ~2.5 s — a single
-     noisy tick can no longer move the number. */
+  /* --- tempo: anchor-biased search + commit/pending hysteresis --- */
   if (signal) {
     const est = tempoFromEnv(env, envRate, displayBpm);
     if (est) {
       if (displayBpm === null) {
         displayBpm = est.bpm; lastCommitT = now;
       } else if (Math.abs(est.bpm - displayBpm) < displayBpm * 0.025) {
-        displayBpm += (est.bpm - displayBpm) * 0.12;   // gentle glide, same tempo
+        displayBpm += (est.bpm - displayBpm) * 0.12;
         pendingBpm = null; pendingN = 0; pendingSum = 0;
       } else {
         if (pendingBpm !== null && Math.abs(est.bpm - pendingBpm) < pendingBpm * 0.02) {
@@ -622,7 +827,7 @@ setInterval(() => {
         } else {
           pendingBpm = est.bpm; pendingN = 1; pendingSum = est.bpm;
         }
-        if (pendingN >= 5 && est.conf > 0.3) {          // ~2.5 s of agreement
+        if (pendingN >= 5 && est.conf > 0.3) {
           displayBpm = pendingSum / pendingN;
           pendingBpm = null; pendingN = 0; pendingSum = 0;
           lastCommitT = now;
@@ -635,42 +840,172 @@ setInterval(() => {
   }
   ui.bpm.textContent = displayBpm !== null ? (displayBpm * mult).toFixed(1) : '---';
 
-  /* --- key --- */
-  const k = keyFromChroma(chromaAcc);
-  if (k && signal && k.r > 0.5 && k.margin > 0.015 && wAbs > decSr * 8) {
-    if (keyCand === k.id) keyCandN++;
-    else { keyCand = k.id; keyCandN = 1; }
-    if (keyCandN >= 4 && keyShown !== k.id) {   // stable for ~2 s before switching
-      keyShown = k.id;
-      ui.key.className = '';
-      ui.key.innerHTML = '';
-      ui.key.appendChild(document.createTextNode(k.name));
-      const cam = document.createElement('span');
-      cam.className = 'cam'; cam.textContent = k.camelot;
-      ui.key.appendChild(cam);
+  /* --- key (only when the KEY lamp is on) --- */
+  if (keyOn) {
+    const k = keyFromChroma(chromaAcc);
+    if (k && signal && k.r > 0.5 && k.margin > 0.015 && wAbs > decSr * 8) {
+      if (keyCand === k.id) keyCandN++;
+      else { keyCand = k.id; keyCandN = 1; }
+      if (keyCandN >= 4 && keyShown !== k.id) {
+        keyShown = k.id;
+        ui.keyline.className = '';
+        ui.keyline.innerHTML = '';
+        ui.keyline.appendChild(document.createTextNode(k.name));
+        const cam = document.createElement('span');
+        cam.className = 'cam'; cam.textContent = k.camelot;
+        ui.keyline.appendChild(cam);
+      }
     }
   }
 
   /* --- status lamp --- */
   let state, label;
-  if (silenceSince !== null && now - silenceSince > 2) { state = 'nosignal'; label = 'NO SIGNAL'; }
-  else if (displayBpm === null)                        { state = 'listening'; label = 'LISTENING'; }
-  else {
-    if (conf > 0.4 && now - lastCommitT > 3) { state = 'locked'; label = 'LOCKED'; }
-    else                                     { state = 'tracking'; label = 'TRACKING'; }
-  }
+  if (mode === 'tuner') {
+    if (silenceSince !== null && now - silenceSince > 2) { state = 'nosignal'; label = 'NO SIGNAL'; }
+    else if (tunerTarget && now - tunerLiveT < 0.8) {
+      state = tunerInTune ? 'intune' : 'tracking';
+      label = tunerInTune ? 'IN TUNE' : 'TUNING';
+    }
+    else { state = 'listening'; label = 'LISTENING'; }
+  } else if (silenceSince !== null && now - silenceSince > 2) { state = 'nosignal'; label = 'NO SIGNAL'; }
+  else if (displayBpm === null) { state = 'listening'; label = 'LISTENING'; }
+  else if (conf > 0.4 && now - lastCommitT > 3) { state = 'locked'; label = 'LOCKED'; }
+  else { state = 'tracking'; label = 'TRACKING'; }
   ui.lamp.className = 'lamp ' + state;
   ui.lamptext.textContent = label;
+  ui.win.classList.toggle('lit', state === 'locked' || state === 'intune');
 
   /* --- warnings --- */
   if (state === 'nosignal') {
-    ui.warn.textContent = 'No signal — check the input device and channel levels.';
-  } else if (curDb < -42 && curDb > -60) {
-    ui.warn.textContent = 'Input is quiet — raise the gain for a faster, tighter lock.';
+    ui.warn.textContent = 'No signal — check the input device and levels.';
+  } else if (mode === 'tempo' && curDb < -42 && curDb > -60) {
+    ui.warn.textContent = 'Input is quiet — raise the gain for a faster lock.';
   } else {
     ui.warn.textContent = '';
   }
 }, 500);
+
+/* ============================== TUNER (≈16×/s) ============================== */
+function ringTail(out) {
+  const K = out.length;
+  const start = wAbs - K;
+  if (start < 0) return false;
+  for (let i = 0; i < K; i++) out[i] = ring[(start + i) & MASK];
+  return true;
+}
+
+setInterval(() => {
+  if (!running || paused || mode !== 'tuner') return;
+  const now = performance.now() / 1000;
+  if (!ringTail(tunerBuf)) return;
+
+  let sum = 0;
+  for (let i = 0; i < tunerBuf.length; i++) sum += tunerBuf[i] * tunerBuf[i];
+  const rms = Math.sqrt(sum / tunerBuf.length);
+  if (rms < 0.004) { renderTunerIdle(now); return; }
+
+  const p = yinPitch(tunerBuf, decSr, 70, 400);
+  if (p && p.clarity > 0.8) {
+    pitchHist.push({ f: p.freq, t: now });
+    if (pitchHist.length > 7) pitchHist.shift();
+  }
+  pitchHist = pitchHist.filter(x => now - x.t < 0.7);
+  if (pitchHist.length >= 3) {
+    const f = median(pitchHist.map(x => x.f));
+    const s = nearestString(f);
+    tunerTarget = s;
+    tunerCents = Math.max(-50, Math.min(50, s.cents));
+    tunerInTune = Math.abs(s.cents) <= 5;
+    tunerLiveT = now;
+    renderTunerLive(f);
+  } else {
+    renderTunerIdle(now);
+  }
+}, 60);
+
+function renderTunerLive(f) {
+  const s = tunerTarget;
+  ui.tnote.textContent = s.n;
+  ui.toct.textContent = s.o;
+  const cents = s.cents;
+  ui.tcents.textContent = (cents > 0 ? '+' : '') + cents.toFixed(0) + ' ¢ · ' + f.toFixed(1) + ' Hz';
+  if (tunerInTune) {
+    ui.thint.textContent = 'In tune';
+  } else {
+    ui.thint.textContent = cents < 0 ? 'Tune up ↑' : 'Tune down ↓';
+  }
+  ui.strings.forEach((el, i) => {
+    el.classList.toggle('on', i === s.idx && !tunerInTune);
+    el.classList.toggle('intune', i === s.idx && tunerInTune);
+  });
+}
+
+function renderTunerIdle(now) {
+  if (tunerTarget && now - tunerLiveT < 0.8) return;   // brief hold after decay
+  tunerTarget = null; tunerInTune = false;
+  ui.tnote.textContent = '–';
+  ui.toct.textContent = '';
+  ui.tcents.innerHTML = '&nbsp;';
+  ui.thint.textContent = 'Play a string';
+  ui.strings.forEach(el => { el.classList.remove('on'); el.classList.remove('intune'); });
+}
+
+/* ---- needle meter ---- */
+function drawNeedle() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = ui.needle.getBoundingClientRect();
+  if (!r.width) return;
+  const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+  if (ui.needle.width !== w || ui.needle.height !== h) { ui.needle.width = w; ui.needle.height = h; }
+  needleCtx.clearRect(0, 0, w, h);
+
+  const cx = w / 2, cy = h * 1.62, R = h * 1.42;
+  const A = 42 * Math.PI / 180;   // half-sweep
+  const angFor = c => (c / 50) * A;
+
+  // In-tune zone (±5 cents).
+  needleCtx.beginPath();
+  needleCtx.arc(cx, cy, R, -Math.PI / 2 + angFor(-5), -Math.PI / 2 + angFor(5));
+  needleCtx.strokeStyle = 'rgba(43,255,144,.22)';
+  needleCtx.lineWidth = 12 * dpr;
+  needleCtx.stroke();
+
+  // Ticks.
+  for (let c = -50; c <= 50; c += 5) {
+    const a = -Math.PI / 2 + angFor(c);
+    const major = c % 25 === 0;
+    const r0 = R - (major ? 14 : 8) * dpr, r1 = R;
+    needleCtx.beginPath();
+    needleCtx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+    needleCtx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    needleCtx.strokeStyle = c === 0 ? 'rgba(143,255,198,.9)' : 'rgba(143,255,198,.3)';
+    needleCtx.lineWidth = (major ? 2 : 1) * dpr;
+    needleCtx.stroke();
+    if (major && c !== 0) {
+      needleCtx.fillStyle = 'rgba(143,255,198,.4)';
+      needleCtx.font = (9 * dpr) + 'px ui-monospace, Menlo, monospace';
+      needleCtx.textAlign = 'center';
+      const rl = R - 24 * dpr;
+      needleCtx.fillText((c > 0 ? '+' : '') + c, cx + Math.cos(a) * rl, cy + Math.sin(a) * rl + 3 * dpr);
+    }
+  }
+
+  // Needle.
+  const active = tunerTarget !== null;
+  const a = -Math.PI / 2 + angFor(needleCents);
+  needleCtx.beginPath();
+  needleCtx.moveTo(cx + Math.cos(a) * (R - 58 * dpr), cy + Math.sin(a) * (R - 58 * dpr));
+  needleCtx.lineTo(cx + Math.cos(a) * (R - 4 * dpr), cy + Math.sin(a) * (R - 4 * dpr));
+  needleCtx.strokeStyle = !active ? 'rgba(143,255,198,.25)'
+    : tunerInTune ? '#2bff90' : 'rgba(232,168,80,.95)';
+  needleCtx.lineWidth = 2.5 * dpr;
+  if (active && tunerInTune) {
+    needleCtx.shadowColor = 'rgba(43,255,144,.8)';
+    needleCtx.shadowBlur = 10 * dpr;
+  }
+  needleCtx.stroke();
+  needleCtx.shadowBlur = 0;
+}
 
 /* ============================== VISUALS (per frame) ============================== */
 function visualFrame() {
@@ -690,37 +1025,69 @@ function visualFrame() {
   for (let i = 0; i < lowBuf.length; i++) ls += lowBuf[i] * lowBuf[i];
   bassSm += (Math.sqrt(ls / lowBuf.length) - bassSm) * 0.25;
 
-  /* level bar */
   const pct = Math.max(0, Math.min(1, (curDb + 60) / 60));
   ui.lvlfill.style.width = (pct * 100).toFixed(1) + '%';
   ui.lvlfill.style.background = curDb > -3 ? 'var(--red)' : curDb > -8 ? 'var(--amber)' : 'var(--phos)';
   ui.lvldb.textContent = (curDb <= -99 ? '-∞' : curDb.toFixed(1)) + ' dB';
 
-  /* bass-reactive pulse */
   const k = Math.min(1, bassSm * 9);
-  ui.glow.style.opacity = k.toFixed(2);
-  ui.disc.style.transform = 'scale(' + (1 + k * 0.045).toFixed(4) + ')';
-  ui.bpm.style.textShadow = '0 0 ' + (16 + k * 34).toFixed(0) + 'px rgba(0,255,136,' + (0.3 + k * 0.45).toFixed(2) + ')';
+  ui.glow.style.opacity = (k * 0.8).toFixed(2);
+  ui.disc.style.transform = 'scale(' + (1 + k * 0.04).toFixed(4) + ')';
+  if (mode === 'tempo') {
+    ui.bpm.style.textShadow = '0 0 ' + (14 + k * 30).toFixed(0) + 'px rgba(43,255,144,' + (0.3 + k * 0.4).toFixed(2) + ')';
+  }
 
-  /* waveform inside the disc */
+  /* waveform label on the platter */
   const dpr = window.devicePixelRatio || 1;
   const r = ui.wave.getBoundingClientRect();
   const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-  if (ui.wave.width !== w || ui.wave.height !== h) { ui.wave.width = w; ui.wave.height = h; }
-  waveCtx.clearRect(0, 0, w, h);
-  waveCtx.strokeStyle = 'rgba(0,255,136,.85)';
-  waveCtx.lineWidth = Math.max(1, dpr);
-  waveCtx.beginPath();
-  const step = Math.max(1, Math.floor(rawBuf.length / 96));
-  for (let i = 0, x = 0; i < rawBuf.length; i += step, x++) {
-    const px = (x / 95) * w;
-    const py = h / 2 - rawBuf[i] * h * 1.4;
-    if (x === 0) waveCtx.moveTo(px, py); else waveCtx.lineTo(px, py);
+  if (w && (ui.wave.width !== w || ui.wave.height !== h)) { ui.wave.width = w; ui.wave.height = h; }
+  if (w) {
+    waveCtx.clearRect(0, 0, w, h);
+    waveCtx.strokeStyle = 'rgba(43,255,144,.9)';
+    waveCtx.lineWidth = Math.max(1, dpr);
+    waveCtx.beginPath();
+    const step = Math.max(1, Math.floor(rawBuf.length / 64));
+    for (let i = 0, x = 0; i < rawBuf.length; i += step, x++) {
+      const px = (x / 63) * w;
+      const py = h / 2 - rawBuf[i] * h * 1.3;
+      if (x === 0) waveCtx.moveTo(px, py); else waveCtx.lineTo(px, py);
+    }
+    waveCtx.stroke();
   }
-  waveCtx.stroke();
+
+  /* needle physics + draw */
+  if (mode === 'tuner') {
+    const target = tunerTarget !== null ? tunerCents : 0;
+    needleCents += (target - needleCents) * 0.25;
+    drawNeedle();
+  }
 }
 
 /* ============================== CONTROLS ============================== */
+function setMode(m) {
+  mode = m;
+  ui.mTempo.setAttribute('aria-pressed', m === 'tempo');
+  ui.mTuner.setAttribute('aria-pressed', m === 'tuner');
+  ui.tempoView.style.display = m === 'tempo' ? 'block' : 'none';
+  ui.tunerView.style.display = m === 'tuner' ? 'block' : 'none';
+  if (m === 'tuner') { pitchHist = []; needleCents = 0; drawNeedle(); }
+}
+ui.mTempo.addEventListener('click', () => setMode('tempo'));
+ui.mTuner.addEventListener('click', () => setMode('tuner'));
+
+ui.keytoggle.addEventListener('click', () => {
+  keyOn = !keyOn;
+  ui.keytoggle.setAttribute('aria-pressed', String(keyOn));
+  ui.keyline.style.display = keyOn ? 'block' : 'none';
+  if (keyOn) {
+    keyShown = null; keyCand = null; keyCandN = 0;
+    ui.keyline.className = 'pending';
+    ui.keyline.textContent = 'Listening for key…';
+    chromaPos = wAbs;   // start fresh from now
+  }
+});
+
 function setMult(m) {
   mult = (mult === m) ? 1 : m;
   ui.half.classList.toggle('on', mult === 0.5);
@@ -734,7 +1101,7 @@ async function togglePause() {
   if (!running) return;
   paused = !paused;
   ui.disc.classList.toggle('paused', paused);
-  ui.dischint.textContent = paused ? 'Paused — tap to resume' : 'Tap to pause';
+  ui.dischint.textContent = paused ? 'Paused — tap to resume' : 'Tap platter to pause';
   if (paused) {
     ui.lamp.className = 'lamp paused';
     ui.lamptext.textContent = 'PAUSED';
@@ -743,10 +1110,10 @@ async function togglePause() {
     await actx.suspend();
   } else {
     await actx.resume();
-    // Re-align read pointers so the silence gap doesn't pollute analysis.
     fluxPos = wAbs; chromaPos = wAbs;
     env = []; prevMag.fill(0);
     pendingBpm = null; pendingN = 0; pendingSum = 0;
+    pitchHist = [];
   }
 }
 ui.disc.addEventListener('click', () => { togglePause().catch(() => {}); });
@@ -773,10 +1140,11 @@ function showErr(e) {
 ui.start.addEventListener('click', async () => {
   ui.err.style.display = 'none';
   try {
-    await startAudio();            // default device first (unlocks labels)
+    await startAudio();
     await populateDevices();
     ui.overlay.style.display = 'none';
-    ui.app.style.display = 'flex';
+    ui.app.style.display = 'block';
+    setMode('tempo');
   } catch (e) { showErr(e); }
 });
 
