@@ -217,6 +217,29 @@
   #lvldb{font-family:var(--mono);font-size:10px;color:var(--ink-soft);width:56px;text-align:right}
   #warn{margin-top:4px;font-size:11px;color:#a8571c;min-height:15px}
 
+  /* ---- signal quality panel ---- */
+  #quality{
+    margin-top:14px;border:1px solid var(--face-edge);border-radius:10px;
+    padding:10px 12px 12px;box-shadow:inset 0 1px 2px rgba(0,0,0,.08);
+  }
+  #quality h3{
+    font-size:8px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;
+    color:var(--ink-soft);margin-bottom:8px;
+  }
+  #qgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+  .qcell{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .qcell b{
+    font-size:7.5px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  .qcell span{
+    font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;
+    color:var(--ink);white-space:nowrap;
+  }
+  .qcell span.warn{color:#a8571c}
+  .qcell span.bad{color:var(--red);font-weight:700}
+  .qcell span.good{color:#3d7a55}
+
   footer{
     margin-top:14px;text-align:center;
     font-size:8px;letter-spacing:.24em;text-transform:uppercase;color:#a99d82;
@@ -316,6 +339,18 @@
         <span id="lufsdb">-- LUFS</span>
       </div>
       <div id="warn"></div>
+    </div>
+  </div>
+
+  <div id="quality">
+    <h3>Signal Check</h3>
+    <div id="qgrid">
+      <div class="qcell"><b>Peak</b><span id="qpeak">--</span></div>
+      <div class="qcell"><b>Clip / min</b><span id="qclip">--</span></div>
+      <div class="qcell"><b>DC offset</b><span id="qdc">--</span></div>
+      <div class="qcell"><b>Noise floor</b><span id="qfloor">--</span></div>
+      <div class="qcell"><b>SNR</b><span id="qsnr">--</span></div>
+      <div class="qcell"><b>Hum 50/60</b><span id="qhum">--</span></div>
     </div>
   </div>
 
@@ -609,6 +644,9 @@ const ui = {
   disc:$('disc'), wave:$('wave'), dischint:$('dischint'),
   lvlfill:$('lvlfill'), lvldb:$('lvldb'), warn:$('warn'),
   lufsfill:$('lufsfill'), lufsdb:$('lufsdb'),
+  quality:$('quality'),
+  qpeak:$('qpeak'), qclip:$('qclip'), qdc:$('qdc'),
+  qfloor:$('qfloor'), qsnr:$('qsnr'), qhum:$('qhum'),
   beats:[...document.querySelectorAll('#beats i')],
   compat:$('compat'),
 };
@@ -668,6 +706,25 @@ let lufsWp = 0, lufsGateAcc = 0, lufsGateN = 0, lufsDb = -100;
    correlation against the committed tempo. */
 let beatPhase = 0, beatPhasePrev = -1, lastBeatT = 0;
 
+/* ---- signal quality ----
+   Full-rate accumulators (fed in ingest): peak, clipped samples, DC.
+   Decimated-rate: incremental Goertzel at 50/60/100/120 Hz per 1 s block
+   for mains-hum measurement. Noise floor = quietest 100 ms LUFS gate in
+   the last 10 s (gate history ring below). */
+let qcPeak = 0, qcPeakHold = 0, qcDcAcc = 0, qcClipAcc = 0, qcNAcc = 0;
+const CLIP_RING = 60;                       // per-second clip counts, 60 s
+const clipRing = new Uint32Array(CLIP_RING);
+let clipWp = 0, clipSecAcc = 0, clipSecN = 0, dcFrac = 0;
+const HUM_FREQS = [50, 60, 100, 120];
+let gz = null, gzN = 0, gzBlock = 0, gzTotal = 0, humDb = null;
+function gzInit() {
+  gz = HUM_FREQS.map(f => ({ c: 2 * Math.cos(2 * Math.PI * f / decSr), s1: 0, s2: 0 }));
+  gzN = 0; gzBlock = Math.round(decSr); gzTotal = 0;
+}
+const FLOOR_GATES = 100;                    // 10 s of 100 ms gates
+const floorRing = new Float32Array(FLOOR_GATES).fill(1);
+let floorWp = 0, floorDb = null;
+
 /* Camelot compatible keys helper — returns the 3 adjacent codes. */
 function compatibleKeys(camelot) {
   const num = parseInt(camelot);
@@ -713,6 +770,7 @@ async function startAudio(deviceId) {
   DEC = Math.max(1, Math.round(actx.sampleRate / 11025));
   decSr = actx.sampleRate / DEC;
   envRate = decSr / FLUX_HOP;
+  gzInit();
 
   stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -781,6 +839,10 @@ function resetAnalysis() {
   silenceSince = null;
   lufsRing.fill(0); lufsWp = 0; lufsGateAcc = 0; lufsGateN = 0; lufsDb = -100;
   beatPhase = 0; beatPhasePrev = -1; lastBeatT = 0;
+  qcPeak = 0; qcPeakHold = 0; qcDcAcc = 0; qcClipAcc = 0; qcNAcc = 0;
+  clipRing.fill(0); clipWp = 0; clipSecAcc = 0; dcFrac = 0;
+  floorRing.fill(1); floorWp = 0; floorDb = null; humDb = null;
+  if (decSr) gzInit();
   ui.keyline.className = 'pending';
   ui.keyline.textContent = 'Listening for key…';
 }
@@ -803,20 +865,57 @@ async function populateDevices() {
 function ingest(chunk) {
   if (paused) return;
   for (let i = 0; i < chunk.length; i++) {
-    decSum += chunk[i];
+    const x = chunk[i];
     // LUFS gate: accumulate squared samples at full sample rate for short-term loudness.
-    lufsGateAcc += chunk[i] * chunk[i]; lufsGateN++;
+    lufsGateAcc += x * x; lufsGateN++;
+    // Quality: peak, clipped samples, DC — at full rate.
+    const ax = Math.abs(x);
+    if (ax > qcPeak) qcPeak = ax;
+    if (ax >= 0.999) qcClipAcc++;
+    qcDcAcc += x; qcNAcc++;
     const gateSamples = actx ? Math.round(actx.sampleRate * LUFS_GATE_MS / 1000) : 4800;
     if (lufsGateN >= gateSamples) {
-      lufsRing[lufsWp % LUFS_GATES] = lufsGateAcc / lufsGateN;
+      const gatePow = lufsGateAcc / lufsGateN;
+      lufsRing[lufsWp % LUFS_GATES] = gatePow;
       lufsWp++;
+      // Noise-floor gate history (10 s).
+      floorRing[floorWp % FLOOR_GATES] = gatePow;
+      floorWp++;
       lufsGateAcc = 0; lufsGateN = 0;
     }
+    decSum += x;
     if (++decCnt === DEC) {
-      ring[wAbs & MASK] = decSum / DEC;
+      const d = decSum / DEC;
+      ring[wAbs & MASK] = d;
       wAbs++; decSum = 0; decCnt = 0;
+      // Hum Goertzel on the decimated stream (1 s blocks).
+      if (gz) {
+        for (let g = 0; g < 4; g++) {
+          const st = gz[g];
+          const s0 = d + st.c * st.s1 - st.s2;
+          st.s2 = st.s1; st.s1 = s0;
+        }
+        gzTotal += d * d;
+        if (++gzN >= gzBlock) {
+          let humP = 0;
+          for (let g = 0; g < 4; g++) {
+            const st = gz[g];
+            humP += st.s1 * st.s1 + st.s2 * st.s2 - st.c * st.s1 * st.s2;
+            st.s1 = 0; st.s2 = 0;
+          }
+          humP /= (gzN * gzN / 4);          // normalize Goertzel power
+          const totP = gzTotal / gzN;
+          humDb = (totP > 1e-10 && humP > 0) ? 10 * Math.log10(Math.min(1, humP / totP)) : null;
+          // Roll per-second clip count into the 60 s ring.
+          clipRing[clipWp % CLIP_RING] = clipSecAcc;
+          clipWp++; clipSecAcc = 0;
+          gzN = 0; gzTotal = 0;
+        }
+      }
     }
   }
+  // Per-second clip accounting rides the Goertzel block; accumulate here.
+  clipSecAcc += qcClipAcc; qcClipAcc = 0;
   if (wAbs - fluxPos > CAP) fluxPos = wAbs - (CAP >> 1);
   if (wAbs - chromaPos > CAP) chromaPos = wAbs - (CAP >> 1);
   processFlux();
@@ -1009,7 +1108,57 @@ setInterval(() => {
     beatPhasePrev = -1;
   }
 
-  /* --- compatible keys (shown when key is detected) --- */
+  /* --- signal quality panel --- */
+  // Peak hold with slow decay.
+  if (qcPeak > qcPeakHold) qcPeakHold = qcPeak;
+  else qcPeakHold *= 0.96;
+  qcPeak = 0;
+  const peakDb = qcPeakHold > 1e-6 ? 20 * Math.log10(qcPeakHold) : -100;
+  ui.qpeak.textContent = peakDb <= -99 ? '--' : peakDb.toFixed(1) + ' dBFS';
+  ui.qpeak.className = peakDb > -0.3 ? 'bad' : peakDb > -3 ? 'warn' : peakDb > -90 ? 'good' : '';
+
+  // Clips in the last 60 s.
+  let clips = 0;
+  const csecs = Math.min(clipWp, CLIP_RING);
+  for (let i = 0; i < csecs; i++) clips += clipRing[(clipWp - 1 - i + CLIP_RING) % CLIP_RING];
+  ui.qclip.textContent = csecs === 0 ? '--' : String(clips);
+  ui.qclip.className = clips > 200 ? 'bad' : clips > 0 ? 'warn' : csecs > 2 ? 'good' : '';
+
+  // DC offset over the accumulation window since last tick.
+  if (qcNAcc > 1000) { dcFrac = qcDcAcc / qcNAcc; qcDcAcc = 0; qcNAcc = 0; }
+  const dcPct = Math.abs(dcFrac) * 100;
+  ui.qdc.textContent = signal ? dcPct.toFixed(2) + ' %' : '--';
+  ui.qdc.className = dcPct > 2 ? 'bad' : dcPct > 0.5 ? 'warn' : signal ? 'good' : '';
+
+  // Noise floor: quietest 100 ms gate in the last 10 s.
+  const fgates = Math.min(floorWp, FLOOR_GATES);
+  if (fgates >= 20) {
+    let minP = Infinity;
+    for (let i = 0; i < fgates; i++) {
+      const p = floorRing[(floorWp - 1 - i + FLOOR_GATES) % FLOOR_GATES];
+      if (p < minP) minP = p;
+    }
+    floorDb = minP > 1e-12 ? 10 * Math.log10(minP) : -120;
+  }
+  ui.qfloor.textContent = floorDb === null ? '--' : (floorDb <= -119 ? '<-119' : floorDb.toFixed(0)) + ' dB';
+  ui.qfloor.className = floorDb === null ? '' : floorDb > -45 ? 'bad' : floorDb > -60 ? 'warn' : 'good';
+
+  // SNR: current short-term loudness above the floor.
+  if (floorDb !== null && lufsDb > -90 && signal) {
+    const snr = lufsDb - floorDb;
+    ui.qsnr.textContent = snr.toFixed(0) + ' dB';
+    ui.qsnr.className = snr < 20 ? 'bad' : snr < 40 ? 'warn' : 'good';
+  } else {
+    ui.qsnr.textContent = '--'; ui.qsnr.className = '';
+  }
+
+  // Mains hum (50/60/100/120 Hz energy relative to total).
+  if (humDb !== null && signal) {
+    ui.qhum.textContent = humDb.toFixed(0) + ' dB';
+    ui.qhum.className = humDb > -20 ? 'bad' : humDb > -35 ? 'warn' : 'good';
+  } else {
+    ui.qhum.textContent = '--'; ui.qhum.className = '';
+  }
   if (keyOn && keyShown !== null) {
     const cam = ui.keyline.querySelector('.cam');
     if (cam) {
@@ -1244,6 +1393,7 @@ function setMode(m) {
   ui.mTuner.setAttribute('aria-pressed', m === 'tuner');
   ui.tempoView.style.display = m === 'tempo' ? 'block' : 'none';
   ui.tunerView.style.display = m === 'tuner' ? 'block' : 'none';
+  ui.quality.style.display = m === 'tempo' ? 'block' : 'none';
   if (m === 'tuner') { pitchHist = []; needleCents = 0; drawNeedle(); }
 }
 ui.mTempo.addEventListener('click', () => setMode('tempo'));
