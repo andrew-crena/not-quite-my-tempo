@@ -476,17 +476,25 @@ function yinPitch(buf, sr, fmin, fmax) {
     for (let t = tauMin; t <= tauMax; t++) if (cm[t] < mv) { mv = cm[t]; mi = t; }
     if (mv < 0.3) tau = mi; else return null;
   }
+  // Octave guard: a strong subharmonic can make YIN pick a period twice the
+  // true one (reads an octave low). If half the chosen period also sits in a
+  // deep dip, the real fundamental is up there — prefer it.
+  let chosen = tau;
+  const half = Math.round(tau / 2);
+  if (half >= tauMin && cm[half] < cm[tau] * 1.25 && cm[half] < 0.3) {
+    chosen = half;
+  }
   // Parabolic interpolation for sub-sample period.
-  let betterTau = tau;
-  if (tau > 1 && tau < tauMax) {
-    const a = cm[tau - 1], b = cm[tau], c = cm[tau + 1];
+  let betterTau = chosen;
+  if (chosen > 1 && chosen < tauMax) {
+    const a = cm[chosen - 1], b = cm[chosen], c = cm[chosen + 1];
     const den = a - 2 * b + c;
     if (den > 0) {
       const dd = 0.5 * (a - c) / den;
-      if (dd > -1 && dd < 1) betterTau = tau + dd;
+      if (dd > -1 && dd < 1) betterTau = chosen + dd;
     }
   }
-  return { freq: sr / betterTau, clarity: 1 - cm[tau] };
+  return { freq: sr / betterTau, clarity: 1 - cm[chosen] };
 }
 
 const GUITAR_STRINGS = [
@@ -899,17 +907,49 @@ setInterval(() => {
   const now = performance.now() / 1000;
   if (!ringTail(tunerBuf)) return;
 
-  let sum = 0;
-  for (let i = 0; i < tunerBuf.length; i++) sum += tunerBuf[i] * tunerBuf[i];
+  // Two cascaded one-pole high-pass stages (~12 dB/oct, corner ~72 Hz) to
+  // strongly reject 60 Hz mains hum and rumble — the main things that defeat
+  // pitch detection on a weak pickup — while the low-E fundamental (82 Hz)
+  // still passes. Also removes DC.
+  const a = 0.96;
+  let y1 = 0, x1 = tunerBuf[0];
+  let y2 = 0, x2 = 0;
+  for (let i = 0; i < tunerBuf.length; i++) {
+    const x = tunerBuf[i];
+    const s1 = a * (y1 + x - x1); x1 = x; y1 = s1;
+    const s2 = a * (y2 + s1 - x2); x2 = s1; y2 = s2;
+    tunerBuf[i] = s2;
+  }
+
+  let sum = 0, peak = 0;
+  for (let i = 0; i < tunerBuf.length; i++) {
+    const v = tunerBuf[i];
+    sum += v * v;
+    const ab = Math.abs(v); if (ab > peak) peak = ab;
+  }
   const rms = Math.sqrt(sum / tunerBuf.length);
-  if (rms < 0.004) { renderTunerIdle(now); return; }
+
+  // Very low floor — only truly silent input is rejected. A weak mic that
+  // peaks around −45 dBFS still passes and gets boosted below.
+  if (rms < 0.0005) { renderTunerIdle(now); return; }
+
+  // Adaptive normalization: scale the frame so its peak sits near 0.5,
+  // giving YIN a consistent amplitude regardless of how hot or quiet the
+  // interface runs. Cap the gain so noise isn't amplified into a false
+  // reading during near-silence.
+  const gain = peak > 1e-4 ? Math.min(60, 0.5 / peak) : 1;
+  if (gain !== 1) for (let i = 0; i < tunerBuf.length; i++) tunerBuf[i] *= gain;
 
   const p = yinPitch(tunerBuf, decSr, 70, 400);
-  if (p && p.clarity > 0.8) {
+  // Clarity gate scales with level: a strong signal must be clean, a weak
+  // one is allowed to be a little rougher (the median vote below still
+  // rejects sporadic bad frames).
+  const clarityGate = rms > 0.01 ? 0.82 : 0.70;
+  if (p && p.clarity > clarityGate) {
     pitchHist.push({ f: p.freq, t: now });
-    if (pitchHist.length > 7) pitchHist.shift();
+    if (pitchHist.length > 8) pitchHist.shift();
   }
-  pitchHist = pitchHist.filter(x => now - x.t < 0.7);
+  pitchHist = pitchHist.filter(x => now - x.t < 0.8);
   if (pitchHist.length >= 3) {
     const f = median(pitchHist.map(x => x.f));
     const s = nearestString(f);
