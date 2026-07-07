@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0f0d0a">
-<title>Not Quite My Tempo — BPM · Tuner</title>
+<title>Not Quite My Tempo — BPM · Tuner · Key · LUFS</title>
 <style>
   :root{
     --room:#0f0d0a;            /* the dark shelf the unit sits on */
@@ -136,6 +136,33 @@
     margin-left:9px;font-size:12px;color:var(--glass);background:var(--phos-soft);
     border-radius:4px;padding:2px 6px;vertical-align:2px;font-weight:700;
   }
+  #compat{
+    margin-top:8px;font-family:var(--mono);font-size:10px;letter-spacing:.15em;
+    color:rgba(143,255,198,.45);min-height:18px;display:none;
+  }
+  #compat .cc{
+    display:inline-block;border:1px solid rgba(143,255,198,.22);border-radius:4px;
+    padding:1px 5px;margin:0 3px;font-weight:700;color:rgba(143,255,198,.6);
+  }
+
+  /* beat phase dots */
+  #beats{display:flex;justify-content:center;gap:12px;margin-top:14px;min-height:16px}
+  #beats i{
+    width:10px;height:10px;border-radius:50%;background:rgba(143,255,198,.12);
+    border:1px solid rgba(143,255,198,.2);transition:background 60ms, box-shadow 60ms;
+  }
+  #beats i.on{background:var(--phos);box-shadow:0 0 8px rgba(43,255,144,.7)}
+  #beats i.dim{background:rgba(143,255,198,.35);box-shadow:none}
+
+  /* LUFS meter */
+  #lufs{display:flex;align-items:center;gap:10px;margin-top:4px}
+  #lufstrack{
+    flex:1;height:6px;background:#d3c7ab;border-radius:3px;overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.25);position:relative;
+  }
+  #lufsfill{height:100%;width:0%;background:var(--phos);border-radius:3px;transition:width .3s}
+  #lufsdb{font-family:var(--mono);font-size:9px;color:var(--ink-soft);width:70px;text-align:right}
+  #lufslabel{font-family:var(--mono);font-size:8px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-soft);width:28px}
 
   /* tuner view */
   #tunerView{display:none}
@@ -256,6 +283,8 @@
         <button class="mini" id="dbl" title="Show double tempo">×2</button>
       </div>
       <div id="keyline" class="pending">Listening for key…</div>
+      <div id="compat"></div>
+      <div id="beats"><i></i><i></i><i></i><i></i></div>
     </div>
 
     <div id="tunerView">
@@ -281,17 +310,22 @@
         <div id="lvltrack"><div id="lvlfill"></div></div>
         <span id="lvldb">-- dB</span>
       </div>
+      <div id="lufs">
+        <span id="lufslabel">LUFS</span>
+        <div id="lufstrack"><div id="lufsfill"></div></div>
+        <span id="lufsdb">-- LUFS</span>
+      </div>
       <div id="warn"></div>
     </div>
   </div>
 
-  <footer>autocorrelation tempo · YIN pitch · chromagram key · zero dependencies</footer>
+  <footer>tempo · tuner · key · LUFS · beat phase · zero dependencies</footer>
 </div>
 
 <div id="overlay">
   <div id="ocard">
     <h2>Not Quite My Tempo</h2>
-    <p>Live BPM for the decks, with a built-in guitar tuner. One tap and it starts listening.</p>
+    <p>Live BPM with beat phase, guitar tuner, key detection with harmonic-mixing hints, and broadcast loudness metering. One tap and it starts listening.</p>
     <button id="startbtn">START</button>
     <p id="err"></p>
   </div>
@@ -574,6 +608,9 @@ const ui = {
   strings:[...document.querySelectorAll('#strings span')],
   disc:$('disc'), wave:$('wave'), dischint:$('dischint'),
   lvlfill:$('lvlfill'), lvldb:$('lvldb'), warn:$('warn'),
+  lufsfill:$('lufsfill'), lufsdb:$('lufsdb'),
+  beats:[...document.querySelectorAll('#beats i')],
+  compat:$('compat'),
 };
 const waveCtx = ui.wave.getContext('2d');
 const needleCtx = ui.needle.getContext('2d');
@@ -620,6 +657,27 @@ let tunerTarget = null;         // {idx,n,o,f,cents}
 let tunerCents = 0, needleCents = 0, tunerLiveT = 0, tunerInTune = false;
 
 let bassSm = 0, curDb = -100, silenceSince = null;
+
+/* LUFS: simplified integrated loudness over a sliding 3-second window.
+   We store squared-sample sums per 100ms gate; integrate over 30 gates. */
+const LUFS_GATE_MS = 100, LUFS_GATES = 30;    // 3 s window
+const lufsRing = new Float32Array(LUFS_GATES);
+let lufsWp = 0, lufsGateAcc = 0, lufsGateN = 0, lufsDb = -100;
+
+/* Beat phase: track which of the 4 beats we're on using onset envelope
+   correlation against the committed tempo. */
+let beatPhase = 0, beatPhasePrev = -1, lastBeatT = 0;
+
+/* Camelot compatible keys helper — returns the 3 adjacent codes. */
+function compatibleKeys(camelot) {
+  const num = parseInt(camelot);
+  const letter = camelot.slice(-1);
+  if (isNaN(num)) return [];
+  const up = ((num % 12) + 1) || 12;   // 12 wraps to 12, not 0
+  const dn = ((num - 2 + 12) % 12) + 1;
+  const flip = letter === 'A' ? 'B' : 'A';
+  return [dn + letter, num + flip, up + letter];
+}
 
 /* ============================== AUDIO ============================== */
 const WORKLET_SRC = `
@@ -721,6 +779,8 @@ function resetAnalysis() {
   keyShown = null; keyCand = null; keyCandN = 0;
   pitchHist = []; tunerTarget = null; tunerInTune = false;
   silenceSince = null;
+  lufsRing.fill(0); lufsWp = 0; lufsGateAcc = 0; lufsGateN = 0; lufsDb = -100;
+  beatPhase = 0; beatPhasePrev = -1; lastBeatT = 0;
   ui.keyline.className = 'pending';
   ui.keyline.textContent = 'Listening for key…';
 }
@@ -744,6 +804,14 @@ function ingest(chunk) {
   if (paused) return;
   for (let i = 0; i < chunk.length; i++) {
     decSum += chunk[i];
+    // LUFS gate: accumulate squared samples at full sample rate for short-term loudness.
+    lufsGateAcc += chunk[i] * chunk[i]; lufsGateN++;
+    const gateSamples = actx ? Math.round(actx.sampleRate * LUFS_GATE_MS / 1000) : 4800;
+    if (lufsGateN >= gateSamples) {
+      lufsRing[lufsWp % LUFS_GATES] = lufsGateAcc / lufsGateN;
+      lufsWp++;
+      lufsGateAcc = 0; lufsGateN = 0;
+    }
     if (++decCnt === DEC) {
       ring[wAbs & MASK] = decSum / DEC;
       wAbs++; decSum = 0; decCnt = 0;
@@ -890,6 +958,71 @@ setInterval(() => {
     ui.warn.textContent = 'Input is quiet — raise the gain for a faster lock.';
   } else {
     ui.warn.textContent = '';
+  }
+
+  /* --- LUFS short-term loudness (3 s sliding window) --- */
+  if (lufsWp > 0) {
+    const gates = Math.min(lufsWp, LUFS_GATES);
+    let sum = 0;
+    for (let i = 0; i < gates; i++) sum += lufsRing[(lufsWp - 1 - i + LUFS_GATES) % LUFS_GATES];
+    const meanSq = sum / gates;
+    lufsDb = meanSq > 1e-10 ? -0.691 + 10 * Math.log10(meanSq) : -100;
+  }
+  const lufsPct = Math.max(0, Math.min(1, (lufsDb + 50) / 50));
+  ui.lufsfill.style.width = (lufsPct * 100).toFixed(1) + '%';
+  ui.lufsfill.style.background = lufsDb > -8 ? 'var(--red)' : lufsDb > -14 ? 'var(--amber)' : 'var(--phos)';
+  ui.lufsdb.textContent = lufsDb <= -99 ? '-- LUFS' : lufsDb.toFixed(1) + ' LUFS';
+
+  /* --- beat phase dots (4-beat visual metronome) --- */
+  if (mode === 'tempo' && displayBpm !== null && conf > 0.3) {
+    // Use onset envelope periodicity: find the phase of a 4-beat cycle
+    // from the last committed tempo. Each dot lights up in sequence.
+    const period = envRate * 60 / (displayBpm * mult);
+    const envLen = env.length;
+    if (period > 2 && envLen > period * 2) {
+      // Cross-correlate the last few beats' worth of envelope against a
+      // single-beat comb to find the current phase.
+      const window = Math.floor(period * 4);
+      const start = Math.max(0, envLen - window);
+      let bestOff = 0, bestVal = -1;
+      for (let off = 0; off < Math.floor(period); off++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) {
+          const idx = start + off + Math.round(k * period);
+          if (idx >= 0 && idx < envLen) s += env[idx];
+        }
+        if (s > bestVal) { bestVal = s; bestOff = off; }
+      }
+      // The "distance from the latest beat" tells us which beat we're on.
+      const dist = (envLen - 1) - (start + bestOff);
+      const phase = ((dist / period) % 4 + 4) % 4;
+      const beatIdx = Math.floor(phase) % 4;
+      if (beatIdx !== beatPhasePrev) { beatPhasePrev = beatIdx; lastBeatT = now; }
+      ui.beats.forEach((el, i) => {
+        const on = i === beatIdx;
+        const dim = i === beatIdx && now - lastBeatT > 0.12;
+        el.className = on ? (dim ? 'dim' : 'on') : '';
+      });
+    }
+  } else {
+    ui.beats.forEach(el => { el.className = ''; });
+    beatPhasePrev = -1;
+  }
+
+  /* --- compatible keys (shown when key is detected) --- */
+  if (keyOn && keyShown !== null) {
+    const cam = ui.keyline.querySelector('.cam');
+    if (cam) {
+      const cc = compatibleKeys(cam.textContent);
+      if (cc.length) {
+        ui.compat.style.display = 'block';
+        ui.compat.innerHTML = '<span style="margin-right:4px">MIX WITH</span>' +
+          cc.map(c => '<span class="cc">' + c + '</span>').join('');
+      }
+    }
+  } else {
+    ui.compat.style.display = 'none';
+    ui.compat.innerHTML = '';
   }
 }, 500);
 
@@ -1125,6 +1258,10 @@ ui.keytoggle.addEventListener('click', () => {
     ui.keyline.className = 'pending';
     ui.keyline.textContent = 'Listening for key…';
     chromaPos = wAbs;   // start fresh from now
+  } else {
+    ui.compat.style.display = 'none';
+    ui.compat.innerHTML = '';
+    keyShown = null;
   }
 });
 
