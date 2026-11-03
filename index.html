@@ -7,6 +7,13 @@
 <meta name="theme-color" content="#0f0d0a">
 <meta name="description" content="Live BPM with beat phase and tap tempo, a guitar, bass and chromatic tuner, key detection with Camelot mixing hints, and EBU R128 loudness. Runs in the browser; audio never leaves your device.">
 <title>Not Quite My Tempo · BPM, Tuner, Key, LUFS</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tempo">
 <style>
   :root{
     --room:#0f0d0a;
@@ -36,7 +43,9 @@
     background:radial-gradient(ellipse 75% 50% at 50% 40%,rgba(43,255,144,.10),transparent 70%);
   }
   button,select,input{font:inherit;color:inherit}
-  button{cursor:pointer;touch-action:manipulation}
+  button,a,select,[role=button]{cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  button{-webkit-user-select:none;user-select:none}
+  html{overscroll-behavior:none;-webkit-text-size-adjust:100%}   /* no pull-to-refresh resetting a session */
 
   /* ============ faceplate ============ */
   #app{
@@ -47,13 +56,13 @@
     padding:16px 18px 18px;
   }
   #top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-  #home{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);text-decoration:none;padding:6px 0;min-height:32px;display:inline-flex;align-items:center}
+  #home{font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);text-decoration:none;padding:6px 0;min-height:44px;display:inline-flex;align-items:center}
   #home:hover{color:var(--ink)}
-  #helpbtn{background:none;border:1px solid var(--face-edge);border-radius:6px;font-size:12px;font-weight:700;color:var(--ink-soft);padding:6px 10px;min-height:32px}
+  #helpbtn{background:none;border:1px solid var(--face-edge);border-radius:6px;font-size:12px;font-weight:700;color:var(--ink-soft);padding:6px 12px;min-height:44px}
   #hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
   #hdr h1{font-size:12px;font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:var(--ink)}
   #hdr h1 em{font-style:normal;color:var(--ink-soft)}
-  .lamp{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--ink)}
+  .lamp{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;letter-spacing:.12em;color:var(--ink)}
   .lamp i{width:10px;height:10px;border-radius:50%;background:#b7ab8f;border:1px solid rgba(0,0,0,.2);flex:none;transition:background .2s,box-shadow .2s}
   .lamp.listening i{background:var(--amber);box-shadow:0 0 8px rgba(232,135,30,.8)}
   .lamp.nosignal  i{background:var(--red);box-shadow:0 0 8px rgba(214,71,60,.8)}
@@ -63,7 +72,7 @@
   select.panel,#device{
     width:100%;background:var(--face-hi);color:var(--ink);
     border:1px solid var(--face-edge);border-radius:7px;
-    font-family:var(--mono);font-size:13px;padding:9px 10px;min-height:40px;cursor:pointer;
+    font-family:var(--mono);font-size:16px;padding:9px 10px;min-height:48px;cursor:pointer;
   }
   #device{margin-bottom:12px}
   :focus-visible{outline:3px solid var(--ink);outline-offset:2px}
@@ -102,20 +111,20 @@
     color:var(--phos);text-shadow:0 0 16px rgba(43,255,144,.35);user-select:none;
   }
   #subrow{display:flex;justify-content:center;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
-  #subrow .unit{font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--phos-dim)}
+  #subrow .unit{font-size:12px;letter-spacing:.4em;text-transform:uppercase;color:var(--phos-dim)}
   .mini{
     background:transparent;border:1px solid rgba(143,255,198,.4);border-radius:6px;
-    color:var(--phos-soft);font-family:var(--mono);font-size:13px;padding:0 10px;min-height:36px;min-width:44px;
+    color:var(--phos-soft);font-family:var(--mono);font-size:15px;padding:0 12px;min-height:44px;min-width:48px;
   }
   .mini:hover{border-color:rgba(143,255,198,.75)}
   .mini[aria-pressed="true"]{color:var(--glass);background:var(--phos);border-color:var(--phos)}
-  #confrow{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--phos-dim);letter-spacing:.12em}
+  #confrow{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--phos-dim);letter-spacing:.12em}
   #confbar{width:90px;height:4px;border-radius:2px;background:rgba(143,255,198,.15);overflow:hidden}
   #conffill{height:100%;width:0;background:var(--phos-soft);transition:width .3s}
   #keyline{margin-top:14px;font-family:var(--mono);font-size:18px;letter-spacing:.06em;color:var(--phos-soft);min-height:24px}
   #keyline.pending{color:var(--phos-dim);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
   #keyline .cam{margin-left:9px;font-size:13px;color:var(--glass);background:var(--phos-soft);border-radius:4px;padding:2px 6px;vertical-align:2px;font-weight:700}
-  #compat{margin-top:8px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--phos-dim);min-height:18px}
+  #compat{margin-top:8px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--phos-dim);min-height:18px}
   #compat .cc{display:inline-block;border:1px solid rgba(143,255,198,.4);border-radius:4px;padding:1px 6px;margin:0 3px;font-weight:700;color:var(--phos-soft)}
 
   #beats{display:flex;justify-content:center;gap:12px;margin-top:14px;min-height:16px}
@@ -123,14 +132,20 @@
   #beats i.on{background:var(--phos);box-shadow:0 0 8px rgba(43,255,144,.7)}
   #beats i.dim{background:rgba(143,255,198,.4)}
 
-  #taprow{display:flex;gap:8px;justify-content:center;margin-top:14px;align-items:center;flex-wrap:wrap}
-  #tapread{font-family:var(--mono);font-size:12px;color:var(--phos-dim);min-width:92px;text-align:left}
+  #taprow{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:16px;align-items:stretch}
+  #tap{min-height:64px;font-size:18px;letter-spacing:.2em;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  #tap.hit{background:rgba(43,255,144,.3)}
+  #tap #tapread{min-width:0;font-weight:400;letter-spacing:.04em}
+  #reset{min-height:64px}
+  #keylist{display:block}
+  @media (hover:none) and (pointer:coarse){ #keylist{display:none} }
+  #tapread{font-family:var(--mono);font-size:13px;color:var(--phos-dim);min-width:84px;text-align:center}
 
   /* tuner */
   #tunerTop{display:flex;gap:8px;margin-bottom:14px;align-items:center;justify-content:center;flex-wrap:wrap}
-  #tuning{flex:1 1 100%;background:#121812;color:var(--phos-soft);border:1px solid rgba(143,255,198,.3);border-radius:6px;font-family:var(--mono);font-size:12px;padding:0 8px;min-height:36px}
+  #tuning{flex:1 1 100%;min-width:0;width:100%;max-width:100%;text-overflow:ellipsis;background:#121812;color:var(--phos-soft);border:1px solid rgba(143,255,198,.3);border-radius:6px;font-family:var(--mono);font-size:16px;padding:0 8px;min-height:48px}
   #a4box{display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:12px;color:var(--phos-dim)}
-  #a4box .mini{min-width:32px;padding:0 6px}
+  #a4box .mini{min-width:48px;padding:0 6px;font-size:18px}
   #a4val{min-width:52px;text-align:center;color:var(--phos-soft)}
   #tnrow{display:flex;align-items:baseline;justify-content:center;gap:6px}
   #tnote{font-family:var(--mono);font-size:clamp(62px,18vw,90px);font-weight:700;line-height:1;color:var(--phos);text-shadow:0 0 16px rgba(43,255,144,.35)}
@@ -143,14 +158,14 @@
   #strings{display:flex;justify-content:center;gap:6px;margin-top:14px;flex-wrap:wrap}
   #strings button{
     font-family:var(--mono);font-size:14px;color:var(--phos-dim);background:transparent;
-    min-width:40px;min-height:44px;padding:0 4px;border:1px solid rgba(143,255,198,.28);border-radius:6px;
+    min-width:44px;min-height:48px;padding:0 4px;border:1px solid rgba(143,255,198,.28);border-radius:6px;
     transition:color .15s,border-color .15s,background .15s;
   }
-  #strings button sub{font-size:9px}
+  #strings button sub{font-size:12px}
   #strings button.on{color:var(--phos-soft);border-color:rgba(143,255,198,.7)}
   #strings button.intune{color:var(--glass);background:var(--phos);border-color:var(--phos)}
   #strings button[aria-pressed="true"]{border-style:dashed;border-width:2px;border-color:var(--amber)}
-  #pinnote{margin-top:8px;font-size:11px;color:var(--phos-dim);min-height:15px}
+  #pinnote{margin-top:8px;font-size:12px;color:var(--phos-dim);min-height:15px}
 
   /* deck */
   #deck{display:flex;align-items:center;gap:16px;margin-top:16px}
@@ -167,21 +182,21 @@
   #disc:focus-visible{outline-offset:4px}
   #wave{width:64px;height:26px}
   #deckright{flex:1;display:flex;flex-direction:column;gap:7px;min-width:0}
-  #dischint{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft)}
+  #dischint{font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft)}
   .meter{display:flex;align-items:center;gap:8px}
-  .meter .ml{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--ink-soft);width:34px}
+  .meter .ml{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--ink-soft);width:34px}
   .track{flex:1;height:8px;background:#d3c7ab;border-radius:4px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.25)}
   .fill{height:100%;width:0%;background:var(--phos);border-radius:4px}
-  .meter .mv{font-family:var(--mono);font-size:11px;color:var(--ink);width:74px;text-align:right;font-variant-numeric:tabular-nums}
-  #lufsread{font-family:var(--mono);font-size:11px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .meter .mv{font-family:var(--mono);font-size:12px;color:var(--ink);width:80px;text-align:right;font-variant-numeric:tabular-nums}
+  #lufsread{font-family:var(--mono);font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
   #warn{font-size:12px;color:var(--warn-ink);min-height:16px;font-weight:600}
 
   /* quality */
   #quality{margin-top:14px;border:1px solid var(--face-edge);border-radius:10px;padding:10px 12px 12px;box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
-  #quality h2{font-size:11px;font-weight:700;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
+  #quality h2{font-size:12px;font-weight:700;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:8px}
   #qgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;margin:0}
   .qcell{display:flex;flex-direction:column;gap:2px;min-width:0}
-  .qcell dt{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
+  .qcell dt{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
   .qcell dd{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
   .qcell dd.warn{color:var(--warn-ink)}
   .qcell dd.warn::after{content:" !"}
@@ -190,12 +205,12 @@
   .qcell dd.good{color:var(--good)}
 
   #help{margin-top:14px;font-size:13px;color:var(--ink);line-height:1.55;border-top:1px dashed var(--face-edge);padding-top:12px}
-  #help h2{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-soft);margin:10px 0 4px}
+  #help h2{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-soft);margin:10px 0 4px}
   #help h2:first-child{margin-top:0}
   #help kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--face-edge);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--face-hi)}
   #help ul{list-style:none}
   #help li{margin:3px 0}
-  footer{margin-top:14px;text-align:center;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#625743}
+  footer{margin-top:14px;text-align:center;font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#625743}
 
   /* start overlay */
   #overlay{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;background:var(--room);padding:24px}
@@ -209,7 +224,7 @@
   #ocard h1{font-size:13px;font-weight:700;letter-spacing:.32em;text-transform:uppercase;color:var(--ink)}
   #ocard p{font-size:14px;color:var(--ink-soft);line-height:1.6}
   #ocard .small{font-size:12px}
-  #ocard a{color:var(--ink)}
+  #ocard a{color:var(--ink);display:inline-flex;align-items:center;min-height:44px}
   #startbtn{
     width:132px;height:132px;border-radius:50%;
     font-family:var(--mono);font-size:15px;letter-spacing:.14em;font-weight:700;
@@ -278,8 +293,7 @@
       <div id="compat" hidden></div>
       <div id="beats" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div id="taprow">
-        <button type="button" class="mini" id="tap" title="Tap along to the beat (T)">TAP</button>
-        <span id="tapread" aria-live="polite">tap 4×</span>
+        <button type="button" class="mini" id="tap" title="Tap along to the beat (T)">TAP<span id="tapread" aria-live="polite">tap 4×</span></button>
         <button type="button" class="mini" id="reset" title="Forget the current lock, for a new song (R)">RESET</button>
       </div>
     </div>
@@ -337,11 +351,11 @@
   </section>
 
   <section id="help" hidden aria-label="Help">
-    <h2>Keys</h2>
+    <div id="keylist"><h2>Keys</h2>
     <ul>
       <li><kbd>Space</kbd> pause / resume · <kbd>1</kbd> tempo · <kbd>2</kbd> tuner · <kbd>K</kbd> key detection</li>
       <li><kbd>T</kbd> tap tempo · <kbd>R</kbd> reset lock · <kbd>H</kbd> half · <kbd>D</kbd> double</li>
-    </ul>
+    </ul></div>
     <h2>Tempo</h2>
     <p>Locks in 4–8 seconds on music with a clear beat. If it reads half or double what you feel, use ÷2 or ×2; that ambiguity is inherent to tempo, not a fault. Reset when the song changes. The four dots follow the beat; they mark beats, not where the bar starts.</p>
     <h2>Tuner</h2>
@@ -459,6 +473,20 @@ function announce(msg, force) {
   ui.announce.textContent = '';
   setTimeout(() => { ui.announce.textContent = msg; }, 30);
 }
+
+/* ============================== PHONE ==============================
+   Keep the screen on while listening (otherwise phones sleep after ~30 s
+   and the browser stops the microphone), and buzz once on reaching pitch. */
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { wakeLock = null; }
+}
+function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
 
 /* ============================== AUDIO ============================== */
 const WORKLET_SRC = `
@@ -928,7 +956,7 @@ function renderTunerLive(f) {
   ui.thint.textContent = hint; ui.thint.className = cls;
   // Speak state changes, not every frame.
   const key = name + cls;
-  if (key !== lastTunerAnnounce) { lastTunerAnnounce = key; announce(spoken, cls === 'ok'); }
+  if (key !== lastTunerAnnounce) { lastTunerAnnounce = key; announce(spoken, cls === 'ok'); if (cls === 'ok') buzz(40); }
   [...ui.strings.children].forEach((el, i) => {
     el.classList.toggle('on', i === s.idx && !tunerInTune);
     el.classList.toggle('intune', i === s.idx && tunerInTune);
@@ -1084,7 +1112,8 @@ ui.dbl.addEventListener('click', () => setMult(2));
 
 function doTap() {
   const r = taps.tap(performance.now() / 1000);
-  ui.tap.animate && !reduceMotion && ui.tap.animate([{ background: 'rgba(43,255,144,.35)' }, { background: 'transparent' }], 160);
+  ui.tap.classList.add('hit'); setTimeout(() => ui.tap.classList.remove('hit'), 90);
+  buzz(10);
   ui.tapread.textContent = r ? 'tap ' + r.bpm.toFixed(1) : 'tap ' + (taps.t.length) + '/3…';
 }
 ui.tap.addEventListener('pointerdown', ev => { ev.preventDefault(); doTap(); });
@@ -1111,6 +1140,7 @@ function setPaused(p, silent) {
     ui.glow.style.opacity = 0; ui.disc.style.transform = 'scale(1)';
     ui.beats.forEach(el => { el.className = ''; });
   }
+  keepAwake(!p);
   if (!silent) announce(p ? 'Paused' : 'Listening', true);
 }
 async function togglePause() {
@@ -1152,7 +1182,10 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
 }
 // Mobile browsers suspend audio when the page is hidden; pick back up on return.
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && running && !paused && actx && actx.state !== 'running') actx.resume().catch(() => {});
+  if (!document.hidden && running && !paused) {
+    if (actx && actx.state !== 'running') actx.resume().catch(() => {});
+    keepAwake(true);   // the lock is dropped whenever the page is hidden
+  }
 });
 
 function showErr(e) {
@@ -1181,6 +1214,10 @@ ui.start.addEventListener('click', async () => {
   } catch (e) { showErr(e); }
   finally { ui.start.disabled = false; ui.start.textContent = 'START'; }
 });
+
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 
 if (location.protocol === 'file:') {
   ui.err.hidden = false;
