@@ -380,7 +380,7 @@
   </div>
 </div>
 
-<script src="dsp.js"></script>
+<script src="dsp.js?v=2"></script>
 <script>
 (() => {
 'use strict';
@@ -431,7 +431,10 @@ const CAP = 1 << 17, MASK = CAP - 1;         // decimated ring (~11 s)
 const ring = new Float32Array(CAP);
 const FCAP = 1 << 14, FMASK = FCAP - 1;      // full-rate ring for pitch refinement
 const fring = new Float32Array(FCAP);
-let wAbs = 0, fAbs = 0, chromaPos = 0, lastIngestT = 0;
+const TCAP = 1 << 13, TMASK = TCAP - 1;      // decimated, tuner-filtered ring (hum notches, band limits)
+const tring = new Float32Array(TCAP);
+let wAbs = 0, fAbs = 0, tAbs = 0, chromaPos = 0, lastIngestT = 0;
+let tpre = null;
 
 let decim = null, flux = null, loud = null, chroma = null;
 const CHROMA_N = 4096, CHROMA_HOP = 2048;
@@ -590,11 +593,13 @@ function resetAnalysis(full) {
     flux = new D.FluxTracker(decSr, 512, 64);
     loud = new D.LoudnessMeter(sr);
     chroma = new D.ChromaTracker(decSr, CHROMA_N);
+    tpre = new D.TunerPrefilter(decSr);
     gzInit();
   } else {
     loud.reset(); chroma.reset();
   }
-  wAbs = 0; fAbs = 0; chromaPos = 0;
+  wAbs = 0; fAbs = 0; tAbs = 0; chromaPos = 0;
+  tpre.reset(); configTunerFilter();
   resetTempo();
   keyShown = null; keyCand = null; keyCandN = 0;
   pitchHist = []; tunerTarget = null; tunerInTune = false;
@@ -643,6 +648,7 @@ function ingest(chunk) {
     const d = decim.push(x);
     if (d !== d) continue;                     // NaN: no decimated sample this time
     ring[wAbs & MASK] = d; wAbs++;
+    tring[tAbs & TMASK] = tpre.push(d); tAbs++;
     flux.push(d);
     for (let g = 0; g < 4; g++) { const st = gz[g]; const s0 = d + st.c * st.s1 - st.s2; st.s2 = st.s1; st.s1 = s0; }
     gzTotal += d * d;
@@ -876,12 +882,20 @@ function updatePins() {
 }
 function setTuning(id) {
   tuningId = id; store.set('tuning', id); pinned = null;
-  buildStrings(); pitchHist = [];
+  buildStrings(); pitchHist = []; configTunerFilter();
 }
 function setA4(v) {
   a4 = Math.max(415, Math.min(466, v)); store.set('a4', a4);
   ui.a4val.textContent = 'A' + a4;
-  buildStrings();
+  buildStrings(); configTunerFilter();
+}
+/* High-pass below the lowest target (rumble, DC) and low-pass a few
+   harmonics above the highest (stiff strings' sharp upper partials). */
+function configTunerFilter() {
+  if (!tpre) return;
+  const r = D.tuningRange(tuning(), a4);
+  tpre.setHighpass(Math.max(18, r.fmin * 0.55));
+  tpre.setLowpass(r.fmax * 4);
 }
 
 function ringTail(out, r, mask, abs) {
@@ -894,21 +908,14 @@ function ringTail(out, r, mask, abs) {
 setInterval(() => {
   if (!running || paused || mode !== 'tuner') return;
   const now = performance.now() / 1000;
-  if (!ringTail(tunerBuf, ring, MASK, wAbs)) return;
+  if (!ringTail(tunerBuf, tring, TMASK, tAbs)) return;
   const t = tuning(), range = D.tuningRange(t, a4);
 
-  // Two one-pole high-pass stages below the lowest target (rejects rumble,
-  // mains hum and DC without eating a bass fundamental).
-  const fc = Math.max(18, range.fmin * 0.55);
-  const a = Math.exp(-2 * Math.PI * fc / decSr);
-  let y1 = 0, x1 = tunerBuf[0], y2 = 0, x2 = 0;
+  // tring is already notched and band-limited, continuously, in ingest().
   let sum = 0, peak = 0;
   for (let i = 0; i < tunerBuf.length; i++) {
-    const x = tunerBuf[i];
-    const s1 = a * (y1 + x - x1); x1 = x; y1 = s1;
-    const s2 = a * (y2 + s1 - x2); x2 = s1; y2 = s2;
-    tunerBuf[i] = s2; sum += s2 * s2;
-    const ab = s2 < 0 ? -s2 : s2; if (ab > peak) peak = ab;
+    const v = tunerBuf[i]; sum += v * v;
+    const ab = v < 0 ? -v : v; if (ab > peak) peak = ab;
   }
   const rms = Math.sqrt(sum / tunerBuf.length);
   if (rms < 0.0005) { renderTunerIdle(now); return; }
@@ -916,19 +923,17 @@ setInterval(() => {
   if (gain !== 1) for (let i = 0; i < tunerBuf.length; i++) tunerBuf[i] *= gain;
 
   const p = D.yinPitch(tunerBuf, decSr, range.fmin, range.fmax);
-  const clarityGate = rms > 0.01 ? 0.82 : 0.7;
-  if (p && p.clarity > clarityGate) {
+  // One clarity gate at every level: a looser gate for quiet input let
+  // through the noisy, drifting readings at the tail of a note.
+  if (p && p.clarity > 0.85) {
     let f = p.freq;
-    if (DEC > 1 && ringTail(tunerFull, fring, FMASK, fAbs)) f = D.refinePitch(tunerFull, sr, f);
+    if (DEC > 1 && ringTail(tunerFull, fring, FMASK, fAbs)) f = D.refinePitch(tunerFull, sr, f, Math.min(2500, range.fmax * 4));
     pitchHist.push({ f, t: now });
     if (pitchHist.length > 7) pitchHist.shift();
   }
   pitchHist = pitchHist.filter(x => now - x.t < 0.6);
-  if (pitchHist.length >= 3) {
-    // Median rejects octave slips; the mean of the inliers smooths jitter.
-    const med = D.median(pitchHist.map(x => x.f));
-    const inl = pitchHist.filter(x => Math.abs(1200 * Math.log2(x.f / med)) < 15);
-    const f = inl.reduce((s, x) => s + x.f, 0) / inl.length;
+  const f = pitchHist.length >= 3 ? D.consensusPitch(pitchHist.map(x => x.f)) : null;
+  if (f) {
     const s = D.tunerTarget(f, t, a4, pinned);
     tunerTarget = s;
     tunerCents = Math.max(-50, Math.min(50, s.cents));

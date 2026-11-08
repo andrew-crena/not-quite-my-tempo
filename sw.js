@@ -1,7 +1,7 @@
 /* Offline support: the app shell is cached on first visit, so the tool opens
    and works with no connection (all analysis is local). Network first, so a
    new version is picked up as soon as you're online; cache as the fallback. */
-const CACHE = 'nqmt-v1';
+const CACHE = 'nqmt-v2';
 const SHELL = ['./', 'index.html', 'dsp.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
