@@ -362,10 +362,20 @@ function yinPitch(buf, sr, fmin, fmax, threshold) {
     if (cm[t] < TH) { while (t + 1 <= tauMax && cm[t + 1] < cm[t]) t++; tau = t; break; }
   }
   if (tau < 0) {
-    let mi = tauMin, mv = cm[tauMin];
-    for (let t = tauMin; t <= tauMax; t++) if (cm[t] < mv) { mv = cm[t]; mi = t; }
-    if (mv < 0.3) tau = mi; else return null;
+    // No dip under the threshold (noisy or decaying note). The global minimum
+    // is often a multiple of the period, so take the earliest dip that comes
+    // close to it instead.
+    let mv = Infinity;
+    for (let t = tauMin; t <= tauMax; t++) if (cm[t] < mv) mv = cm[t];
+    if (mv >= 0.3) return null;
+    const lim = mv * 1.2 + 0.03;
+    for (let t = tauMin; t <= tauMax; t++) {
+      if (cm[t] < lim) { while (t + 1 <= tauMax && cm[t + 1] < cm[t]) t++; tau = t; break; }
+    }
   }
+  // A period at the long end of the search range is the range edge, not a
+  // note (noise, rumble or hum residue); report nothing rather than a guess.
+  if (tau >= tauMax - 1) return null;
   // Octave guard: if half the period is also a deep dip, the fundamental is there.
   const half = Math.round(tau / 2);
   if (half >= tauMin) {
@@ -385,7 +395,16 @@ function yinPitch(buf, sr, fmin, fmax, threshold) {
 /* Refine a coarse frequency on a full-rate buffer: evaluate the difference
    function only around the expected period and interpolate. Restores the
    sub-cent precision that decimation costs on high notes. */
-function refinePitch(buf, sr, fCoarse) {
+function refinePitch(buf, sr, fCoarse, lpFloor) {
+  // Low-pass a copy a few harmonics above the note; skip the filter's start-up.
+  const fc = Math.min(0.45 * sr, Math.max(lpFloor || 2500, 6 * fCoarse));
+  const l1 = lowpass(fc, 0.5411961, sr), l2 = lowpass(fc, 1.3065630, sr);
+  const SKIP = 256;
+  const n = buf.length - SKIP;
+  if (n <= 0) return fCoarse;
+  const x = new Float32Array(n);
+  for (let i = 0; i < buf.length; i++) { const y = l2.process(l1.process(buf[i])); if (i >= SKIP) x[i - SKIP] = y; }
+  buf = x;
   const T = sr / fCoarse, W = Math.min(Math.floor(buf.length - T - 8), 4096);
   if (W < 256) return fCoarse;
   const t0 = Math.max(2, Math.floor(T) - 3), t1 = Math.ceil(T) + 3;
@@ -402,6 +421,61 @@ function refinePitch(buf, sr, fCoarse) {
   const dd = den > 0 ? 0.5 * (a - c) / den : 0;
   const f = sr / (bi + dd);
   return Math.abs(1200 * Math.log2(f / fCoarse)) < 40 ? f : fCoarse;
+}
+
+/* Tuner pre-filter, run continuously on the decimated stream so the narrow
+   notches are settled (applying them per analysis window would ring).
+   Removes DC/rumble below the lowest target and 50/60 Hz hum plus their
+   second harmonics, which otherwise beat with low strings and capture the
+   pitch search once a note decays. */
+function notch(f0, q, fs) {               // RBJ cookbook
+  const w = 2 * Math.PI * f0 / fs, c = Math.cos(w), al = Math.sin(w) / (2 * q);
+  return new Biquad(1, -2 * c, 1, 1 + al, -2 * c, 1 - al);
+}
+function highpass(fc, q, fs) {            // RBJ cookbook
+  const w = 2 * Math.PI * fc / fs, c = Math.cos(w), al = Math.sin(w) / (2 * q);
+  return new Biquad((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + al, -2 * c, 1 - al);
+}
+function TunerPrefilter(fs) {
+  this.fs = fs;
+  this.notches = [50, 60, 100, 120].map(f => notch(f, 25, fs));
+  this.setHighpass(20);
+  this.setLowpass(0);
+}
+/* Optional low-pass a few harmonics above the highest target: stiff strings
+   (bass especially) have upper partials that run sharp, and a period
+   detector weighs them all. 0 turns it off. */
+TunerPrefilter.prototype.setLowpass = function (fc) {
+  if (this.lc === fc) return;
+  this.lc = fc;
+  this.lp = fc > 0 && fc < 0.45 * this.fs ? [lowpass(fc, 0.5411961, this.fs), lowpass(fc, 1.3065630, this.fs)] : [];
+};
+TunerPrefilter.prototype.setHighpass = function (fc) {
+  if (this.fc === fc) return;
+  this.fc = fc;
+  this.hp = [highpass(fc, 0.5411961, this.fs), highpass(fc, 1.3065630, this.fs)];
+};
+TunerPrefilter.prototype.push = function (x) {
+  for (let i = 0; i < 4; i++) x = this.notches[i].process(x);
+  for (let i = 0; i < this.lp.length; i++) x = this.lp[i].process(x);
+  return this.hp[1].process(this.hp[0].process(x));
+};
+TunerPrefilter.prototype.reset = function () {
+  for (const b of this.notches) b.reset();
+  for (const b of this.hp) b.reset();
+  for (const b of this.lp) b.reset();
+};
+
+/* Combine recent pitch readings: the median rejects octave slips, the mean
+   of readings near it smooths jitter. Returns null unless most readings
+   agree. (With an even split the median falls between two clusters and
+   nothing is near it; averaging an empty set used to give NaN.) */
+function consensusPitch(freqs, tolCents) {
+  if (!freqs.length) return null;
+  const med = median(freqs), tol = tolCents || 15;
+  let s = 0, n = 0;
+  for (const f of freqs) if (Math.abs(1200 * Math.log2(f / med)) < tol) { s += f; n++; }
+  return n * 2 > freqs.length ? s / n : null;
 }
 
 /* ---------- notes, tunings ---------- */
@@ -561,7 +635,7 @@ TapTempo.prototype.tap = function (now) {
 root.NQMT_DSP = {
   makeFFT, median, hann, Biquad, lowpass, kWeighting, Decimator,
   LoudnessMeter, FluxTracker, sharpenEnvelope, tempoFromEnv, beatPhase,
-  yinPitch, refinePitch, NOTE_NAMES, midiToFreq, freqToMidi, noteName, noteOctave,
+  yinPitch, refinePitch, TunerPrefilter, consensusPitch, NOTE_NAMES, midiToFreq, freqToMidi, noteName, noteOctave,
   TUNINGS, tuningRange, tunerTarget, keyFromChroma, compatibleKeys,
   ChromaTracker, TapTempo, BPM_MIN, BPM_MAX,
 };

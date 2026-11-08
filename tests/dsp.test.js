@@ -160,6 +160,56 @@ for (const m of [64, 76, 81, 88]) {             // chromatic, coarse on 12 kHz t
 }
 check('silence -> no pitch', D.yinPitch(new Float32Array(4096), sr, 60, 500) === null);
 
+/* ---- real-world failures: hum, noise, range edge, split readings ---- */
+console.log('tuner robustness');
+const level = (f, fs, pre) => {                    // steady-state gain of the pre-filter, dB
+  let e = 0;
+  for (let i = 0; i < fs * 2; i++) { const y = pre.push(Math.sin(2 * Math.PI * f * i / fs)); if (i >= fs) e += y * y; }
+  return 10 * Math.log10(e / fs / 0.5);
+};
+{
+  const mk = () => { const p = new D.TunerPrefilter(12000); p.setHighpass(34); return p; };
+  const h60 = level(60, 12000, mk()), h50 = level(50, 12000, mk()), e2 = level(82.41, 12000, mk()), a1 = level(55, 12000, mk());
+  check('pre-filter removes 60 Hz hum', h60 < -60, h60.toFixed(1) + ' dB');
+  check('pre-filter removes 50 Hz hum', h50 < -60, h50.toFixed(1) + ' dB');
+  check('pre-filter passes E2', e2 > -0.5, e2.toFixed(2) + ' dB');
+  check('pre-filter passes bass A1 (55 Hz)', a1 > -1, a1.toFixed(2) + ' dB');
+}
+{
+  // Hum alone, at the bottom of the guitar search range: no reading, not "E2 -500c".
+  const r = D.tuningRange(std, 440), b = new Float32Array(4096);
+  for (let i = 0; i < b.length; i++) b[i] = 0.05 * Math.sin(2 * Math.PI * 60 * i / sr) + 0.002 * noise();
+  const p = D.yinPitch(b, sr, r.fmin, r.fmax);
+  check('mains hum at the range edge -> no pitch', p === null, p ? p.freq.toFixed(1) + ' Hz' : 'null');
+}
+{
+  // A quiet B3 in noise takes the fallback path; it must not slip an octave down.
+  let slips = 0, n = 0;
+  const r = D.tuningRange(std, 440);
+  for (let k = 0; k < 20; k++) {
+    const b = pluck(D.midiToFreq(59, 440), sr, 4096, { noise: 0.12 });
+    const p = D.yinPitch(b, sr, r.fmin, r.fmax);
+    if (!p) continue;
+    n++;
+    if (Math.abs(1200 * Math.log2(p.freq / D.midiToFreq(59, 440))) > 600) slips++;
+  }
+  check('noisy B3: no octave slips', n > 10 && slips === 0, slips + ' of ' + n);
+}
+{
+  // Refinement on the full-rate signal must not get worse than the coarse
+  // estimate when broadband noise is present (it used to drift ~10 cents).
+  const fs = 48000, f = D.midiToFreq(59, 440);
+  let worst = 0;
+  for (let k = 0; k < 10; k++) {
+    const b = new Float32Array(8192);
+    for (let i = 0; i < b.length; i++) b[i] = 0.05 * Math.sin(2 * Math.PI * f * i / fs) + 0.02 * noise();   // about 10 dB SNR
+    worst = Math.max(worst, Math.abs(1200 * Math.log2(D.refinePitch(b, fs, f) / f)));
+  }
+  check('refinement in broadband noise within 3 cents', worst < 3, worst.toFixed(2) + 'c worst');
+}
+check('split readings -> no consensus (was NaN)', D.consensusPitch([110, 110.2, 220, 220.4]) === null);
+check('agreeing readings -> mean', Math.abs(D.consensusPitch([110, 110.1, 110.2, 330]) - 110.1) < 1e-9);
+
 /* ---- key ---- */
 console.log('key');
 function chordSeq(midis, secs) {
